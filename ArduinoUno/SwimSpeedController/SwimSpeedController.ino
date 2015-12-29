@@ -1,6 +1,7 @@
-static unsigned int SHORT_TIME = 350; /* Microsecs */
-static unsigned int LONG_TIME = 1050; /* Microsecs */
-static unsigned long DELAY_BETWEEN_MESSAGES = 43; /* Milliseconds */
+static const unsigned int SHORT_TIME = 350; /* Microsecs */
+static const unsigned int LONG_TIME = 1050; /* Microsecs */
+static const unsigned long DELAY_BETWEEN_MESSAGES = 43; /* Milliseconds */
+static const unsigned int FILTER_SIZE = 500;
 
 static String inputString = "";         // a string to hold incoming data
 static boolean stringComplete = false;  // whether the string is complete
@@ -10,13 +11,26 @@ static unsigned int speed_actual = 456;
 
 static const long serialTX_interval = 1000;
 static unsigned long serialTX_previousMillis = 0;
-static char TX_buffer[] = {'D', '0', '0', '0', 'A', '0', '0', '0', '#', '0', '0', '\n', '\0'};
+static char TX_buffer[] = {'D', '0', '0', '0', 'A', '0', '0', '0', '#', '0', '0', '0', '\n', '\0'};
+static char RX_buffer[] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '0'};
+
+static const long sample_interval = 10;
+static unsigned long sample_previousMillis = 0;
+static const int sensorPin = A0;
+static byte speed_measured_filter[ FILTER_SIZE ];
+static int smf_wr_idx = 0;
+
 
 void setup()
 {
   Serial.begin(9600);
   // reserve 200 bytes for the inputString:
   inputString.reserve(200);
+  
+  for(int i = 0; i < FILTER_SIZE; i++)
+  {
+    speed_measured_filter[ i ] = 0;
+  }
   
   pinMode(10, OUTPUT);
   pinMode(11, OUTPUT);
@@ -79,39 +93,48 @@ calc_checksum(char *chars, int len)
   return cs;
 }
 
-void
-write_checksum(char *chars, byte cs)
-{
-  char msn = cs / 16;
-  char lsn = cs % 16;
-  if (msn < 0x0A)
-  {
-    msn += '0';
-  }
-  else
-  {
-    msn -= 0x0A;
-    msn += 'A';
-  }
-  if (lsn < 0x0A)
-  {
-    lsn += '0';
-  }
-  else
-  {
-    lsn -= 0x0A;
-    lsn += 'A';
-  }
-  chars[ 0 ] = msn;
-  chars[ 1 ] = lsn;
-}
-
-
+int sample_count = 0;
 
 void loop()
 {
   unsigned long currentMillis = millis();
   byte cs;
+  
+  /*
+  * Time for Samping Sensor
+  */
+  if(currentMillis - sample_previousMillis >= sample_interval) 
+  {
+    // save the last time
+    sample_previousMillis = currentMillis;
+  
+    float volts = 5.0 * analogRead(sensorPin) / 1023.0;
+    volts = max(volts, 1.25);
+    volts = min(volts, 3.05);
+    float level = (volts - 1.25) * 30.0;
+    speed_measured_filter[ smf_wr_idx ] = round(level);
+    smf_wr_idx++;
+    smf_wr_idx %= FILTER_SIZE;
+    long avg_speed = 0;
+    for(int idx = 0; idx < FILTER_SIZE; idx++)
+    {
+      avg_speed += speed_measured_filter[ idx ];
+    }
+    avg_speed /= FILTER_SIZE;
+    
+    speed_actual = avg_speed;    
+    
+    
+    
+    
+    sample_count++;
+    
+    if (!(sample_count % 100))
+    {
+      Serial.println("100 samples");
+    }
+  }
+  
   
   /*delay(5000);
   Serial.print("Sending...");
@@ -125,7 +148,7 @@ void loop()
   Serial.println("...sent");*/
   
   /*
-  * Serial Transmission Time
+  * Time for Serial Transmission
   */
   if(currentMillis - serialTX_previousMillis >= serialTX_interval) 
   {
@@ -134,19 +157,32 @@ void loop()
     int_to_chars(speed_demand, TX_buffer + 1);
     int_to_chars(speed_actual, TX_buffer + 5);
     cs = calc_checksum(TX_buffer, 9);
-    write_checksum(TX_buffer + 9, cs);
+    int_to_chars(cs, TX_buffer + 9);
     Serial.print(TX_buffer);
   }
     
   // print the string when a newline arrives:
   if (stringComplete) 
   {
-    Serial.println(inputString);
-    // clear the string:
-    inputString = "";
-    stringComplete = false;
-    
-   }
+    if (inputString.length() == 9)
+    {
+      inputString.toCharArray(RX_buffer, 9);
+      cs = calc_checksum(RX_buffer, 5);
+      byte cs2 = atoi(RX_buffer + 5);
+      if (cs != cs2)
+      {
+        Serial.print("ERROR : Checksum should be ");
+        Serial.println(cs);
+      }
+      else
+      {
+        speed_demand = atoi(RX_buffer + 1);
+      }
+      // clear the string:
+      inputString = "";
+      stringComplete = false;
+    }  
+  }
 }
 
 /*
