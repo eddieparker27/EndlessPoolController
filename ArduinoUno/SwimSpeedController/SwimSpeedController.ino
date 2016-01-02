@@ -3,9 +3,7 @@
 static const unsigned int RADIO_CYCLE_TIME = 350; /* Microsecs */
 static const unsigned int RADIO_SHORT_CYCLE_COUNT = 1; /* 1x the CYCLE TIME */
 static const unsigned int RADIO_LONG_CYCLE_COUNT = 3; /* 3x the CYCLE TIME */
-static const unsigned int MESSAGE_BURST_COUNT = 1;
-static const unsigned long DELAY_BETWEEN_MESSAGES = 43; /* Milliseconds */
-static const unsigned long DELAY_BETWEEN_MESSAGE_BURSTS = 1000; /* Milliseconds */
+static const unsigned long DELAY_BETWEEN_MESSAGES = 100; /* Milliseconds */
 static const unsigned int FILTER_SIZE = 500;
 static const char *slower =  "0111100010100001011010000101";
 static const char *faster =  "0111100010011001011010010101";
@@ -29,11 +27,15 @@ static int radio_bit_countdown = 0;
 static int radio_pin_state = LOW;
 static const int radio_pin = 10;
 
+static const long radioTX_interval = DELAY_BETWEEN_MESSAGES;
+static unsigned long radioTX_previousMillis = 0;
+
+
 static String inputString = "";         // a string to hold incoming data
 static boolean stringComplete = false;  // whether the string is complete
 
-static unsigned int speed_demand = 123;
-static unsigned int speed_actual = 456;
+static unsigned int speed_demand = 0;
+static unsigned int speed_actual = 0;
 
 static const long serialTX_interval = 1000;
 static unsigned long serialTX_previousMillis = 0;
@@ -201,23 +203,41 @@ void loop()
     
     sample_count++;
     
-    if (!(sample_count % 100))
+    /*if (!(sample_count % 100))
     {
       Serial.println("100 samples");
+    }*/
+  }
+  
+  /*
+  * Time for Radio Transmission
+  */
+  if(currentMillis - radioTX_previousMillis >= radioTX_interval) 
+  {
+    // save the last time
+    radioTX_previousMillis = currentMillis;
+    /* Only try sending if not already */
+    if (next_radio_bit == NULL)
+    {
+      if (((speed_demand == 0) && (speed_actual > 0)) ||
+          ((speed_demand > 0) && (speed_actual == 0)))
+      {
+        next_radio_bit = onoff_bits;
+        radio_bit_countdown = 28;        
+      }
+      else if (speed_demand > speed_actual)
+      {
+        next_radio_bit = faster_bits;
+        radio_bit_countdown = 28;
+      }
+      else if (speed_demand < speed_actual)
+      {
+        next_radio_bit = slower_bits;
+        radio_bit_countdown = 28;
+      }
     }
   }
   
-  
-  /*delay(5000);
-  Serial.print("Sending...");
-  digitalWrite(11, HIGH);
-  for(int i = 0; i < 40; i++)
-  {
-    delay(DELAY_BETWEEN_MESSAGES);
-    transmitt(10, onoff, SHORT_TIME, LONG_TIME);
-  }
-  digitalWrite(11, LOW);
-  Serial.println("...sent");*/
   
   /*
   * Time for Serial Transmission
