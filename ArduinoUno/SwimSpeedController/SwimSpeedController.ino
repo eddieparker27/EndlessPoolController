@@ -4,6 +4,10 @@ static const unsigned int RADIO_CYCLE_TIME = 350; /* Microsecs */
 static const unsigned int RADIO_SHORT_CYCLE_COUNT = 1; /* 1x the CYCLE TIME */
 static const unsigned int RADIO_LONG_CYCLE_COUNT = 3; /* 3x the CYCLE TIME */
 static const unsigned long DELAY_BETWEEN_MESSAGES = 100; /* Milliseconds */
+static const unsigned long SHORT_DELAY_BETWEEN_MESSAGE_BURSTS = 1000; /* Milliseconds */
+static const unsigned long LONG_DELAY_BETWEEN_MESSAGE_BURSTS = 5000; /* Milliseconds */
+static const unsigned long VERY_LONG_DELAY_BETWEEN_MESSAGE_BURSTS = 10000; /* Milliseconds */
+static const unsigned long MESSAGE_BURST_COUNT = 4;
 static const unsigned int FILTER_SIZE = 500;
 static const char *slower =  "0111100010100001011010000101";
 static const char *faster =  "0111100010011001011010010101";
@@ -27,8 +31,9 @@ static int radio_bit_countdown = 0;
 static int radio_pin_state = LOW;
 static const int radio_pin = 10;
 
-static const long radioTX_interval = DELAY_BETWEEN_MESSAGES;
+static long radioTX_interval = DELAY_BETWEEN_MESSAGES;
 static unsigned long radioTX_previousMillis = 0;
+static int radioTX_burst_counter = MESSAGE_BURST_COUNT;
 
 
 static String inputString = "";         // a string to hold incoming data
@@ -219,23 +224,59 @@ void loop()
     /* Only try sending if not already */
     if (next_radio_bit == NULL)
     {
-      if (((speed_demand == 0) && (speed_actual > 0)) ||
-          ((speed_demand > 0) && (speed_actual == 0)))
+      if ((speed_demand > 0) && (speed_actual == 0))
       {
         next_radio_bit = onoff_bits;
-        radio_bit_countdown = 28;        
+        radio_bit_countdown = 28;
+        radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;     
+      }
+      else if ((speed_demand == 0) && (speed_actual > 0))
+      {
+        next_radio_bit = onoff_bits;
+        radio_bit_countdown = 28;
+        radioTX_interval = VERY_LONG_DELAY_BETWEEN_MESSAGE_BURSTS;
       }
       else if (speed_demand > speed_actual)
       {
         next_radio_bit = faster_bits;
         radio_bit_countdown = 28;
+        if (speed_demand > (speed_actual + 4))
+        {
+          radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
+        }
+        else
+        {
+          radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
+        }
       }
       else if (speed_demand < speed_actual)
       {
         next_radio_bit = slower_bits;
         radio_bit_countdown = 28;
+        if (speed_actual > (speed_demand + 4))
+        {
+          radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
+        }
+        else
+        {
+          radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
+        }        
+      }
+      
+      radioTX_burst_counter--;
+      if (radioTX_burst_counter > 0)
+      {
+        radioTX_interval = DELAY_BETWEEN_MESSAGES;
+      }
+      else
+      {
+        radioTX_burst_counter = MESSAGE_BURST_COUNT;
       }
     }
+    else
+    {
+      radioTX_interval = DELAY_BETWEEN_MESSAGES;
+    } 
   }
   
   
