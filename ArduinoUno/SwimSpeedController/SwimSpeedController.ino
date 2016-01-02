@@ -1,7 +1,33 @@
-static const unsigned int SHORT_TIME = 350; /* Microsecs */
-static const unsigned int LONG_TIME = 1050; /* Microsecs */
+#include <TimerOne.h>
+
+static const unsigned int RADIO_CYCLE_TIME = 350; /* Microsecs */
+static const unsigned int RADIO_SHORT_CYCLE_COUNT = 1; /* 1x the CYCLE TIME */
+static const unsigned int RADIO_LONG_CYCLE_COUNT = 3; /* 3x the CYCLE TIME */
+static const unsigned int MESSAGE_BURST_COUNT = 1;
 static const unsigned long DELAY_BETWEEN_MESSAGES = 43; /* Milliseconds */
+static const unsigned long DELAY_BETWEEN_MESSAGE_BURSTS = 1000; /* Milliseconds */
 static const unsigned int FILTER_SIZE = 500;
+static const char *slower =  "0111100010100001011010000101";
+static const char *faster =  "0111100010011001011010010101";
+static const char *onoff =   "0111100010001001011010000101";
+
+struct RADIO_BIT
+{
+  byte high_count;
+  byte low_count;
+};
+
+static const RADIO_BIT onBIT = {RADIO_LONG_CYCLE_COUNT, RADIO_SHORT_CYCLE_COUNT};
+static const RADIO_BIT offBIT = {RADIO_SHORT_CYCLE_COUNT, RADIO_LONG_CYCLE_COUNT};
+
+static RADIO_BIT slower_bits[ 28 ];  
+static RADIO_BIT faster_bits[ 28 ];
+static RADIO_BIT onoff_bits[ 28 ];
+
+static RADIO_BIT* next_radio_bit = NULL;
+static int radio_bit_countdown = 0;
+static int radio_pin_state = LOW;
+static const int radio_pin = 10;
 
 static String inputString = "";         // a string to hold incoming data
 static boolean stringComplete = false;  // whether the string is complete
@@ -20,9 +46,48 @@ static const int sensorPin = A0;
 static byte speed_measured_filter[ FILTER_SIZE ];
 static int smf_wr_idx = 0;
 
+static long radio_ISR_counter = 0;
+
+void radioTimerISR()
+{
+  radio_ISR_counter--;
+  if (radio_ISR_counter < 1)
+  {
+    if (next_radio_bit != NULL)
+    {
+      if (radio_pin_state == LOW)
+      {
+        radio_ISR_counter = next_radio_bit->high_count;
+        radio_pin_state = HIGH;
+      }
+      else
+      {
+        radio_ISR_counter = next_radio_bit->low_count;
+        radio_pin_state = LOW;
+        radio_bit_countdown--;
+        if (radio_bit_countdown > 0)
+        {
+           next_radio_bit++;
+        }
+        else
+        {
+          next_radio_bit = NULL;
+        }
+      }
+    }     
+  }  
+  digitalWrite(radio_pin, radio_pin_state);
+}
 
 void setup()
 {
+  pinMode(10, OUTPUT);
+  pinMode(11, OUTPUT);
+  
+  // set a timer of length 350 microseconds
+  Timer1.initialize(RADIO_CYCLE_TIME);
+  Timer1.attachInterrupt( radioTimerISR );
+  
   Serial.begin(9600);
   // reserve 200 bytes for the inputString:
   inputString.reserve(200);
@@ -32,43 +97,34 @@ void setup()
     speed_measured_filter[ i ] = 0;
   }
   
-  pinMode(10, OUTPUT);
-  pinMode(11, OUTPUT);
-}
-
-void transmitt( int pin,
-                char* code,
-                unsigned int short_time,
-                unsigned int long_time)
-{
-  char *c = code;
-  unsigned int first_time = 0;
-  unsigned int second_time = 0;
-  while(*c != 0)
+  for(int i = 0; i < 28; i++)
   {
-    if (*c == '1')
+    if (slower[ i ] == '1')
     {
-      first_time = long_time;
-      second_time = short_time;            
+      slower_bits[ i ] = onBIT;
     }
     else
     {
-      first_time = short_time;
-      second_time = long_time;
+      slower_bits[ i ] = offBIT;
     }
-    //noInterrupts();
-    digitalWrite(pin, HIGH);
-    delayMicroseconds(first_time);
-    digitalWrite(pin, LOW);
-    delayMicroseconds(second_time);
-    //interrupts();
-    c++;
+    if (faster[ i ] == '1')
+    {
+      faster_bits[ i ] = onBIT;
+    }
+    else
+    {
+      faster_bits[ i ] = offBIT;
+    }
+    if (onoff[ i ] == '1')
+    {
+      onoff_bits[ i ] = onBIT;
+    }
+    else
+    {
+      onoff_bits[ i ] = offBIT;
+    }
   }
 }
-
-char *slower =  "0111100010100001011010000101";
-char *faster =  "0111100010011001011010010101";
-char *onoff =   "0111100010001001011010000101";
 
 void
 int_to_chars(int i, char *chars)
@@ -94,11 +150,27 @@ calc_checksum(char *chars, int len)
 }
 
 int sample_count = 0;
+int radio_message_count = 0;
 
 void loop()
 {
   unsigned long currentMillis = millis();
   byte cs;
+  
+  /*if (next_radio_bit == NULL)
+  {
+    radio_message_count++;
+    next_radio_bit = slower_bits;
+    radio_bit_countdown = 28;
+  }
+  
+  if ((radio_message_count % 50) == 0)
+  {
+    Serial.print(radio_message_count);
+    Serial.print(" : ");
+    Serial.println(currentMillis);
+  }*/
+  
   
   /*
   * Time for Samping Sensor
@@ -178,10 +250,10 @@ void loop()
       {
         speed_demand = atoi(RX_buffer + 1);
       }
-      // clear the string:
-      inputString = "";
-      stringComplete = false;
-    }  
+    } 
+    // Always clear the string 
+    inputString = "";
+    stringComplete = false; 
   }
 }
 
