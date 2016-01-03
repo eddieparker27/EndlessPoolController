@@ -42,10 +42,10 @@ static boolean stringComplete = false;  // whether the string is complete
 static unsigned int speed_demand = 0;
 static unsigned int speed_actual = 0;
 
-static const long serialTX_interval = 1000;
+static const long serialTX_interval = 500;
 static unsigned long serialTX_previousMillis = 0;
-static char TX_buffer[] = {'D', '0', '0', '0', 'A', '0', '0', '0', '#', '0', '0', '0', '\n', '\0'};
-static char RX_buffer[] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '0'};
+static char TX_buffer[] = {'S', '0', '0', 'D', '0', '0', '0', 'A', '0', '0', '0', '#', '0', '0', '0', '\n', '\0'};
+static char RX_buffer[] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '0'};
 
 static const long sample_interval = 10;
 static unsigned long sample_previousMillis = 0;
@@ -54,6 +54,11 @@ static byte speed_measured_filter[ FILTER_SIZE ];
 static int smf_wr_idx = 0;
 
 static long radio_ISR_counter = 0;
+
+static char ss_command = '0';
+static char ss_status = '0';
+static char control_command = '0';
+static char control_status = '0';
 
 void radioTimerISR()
 {
@@ -158,6 +163,8 @@ calc_checksum(char *chars, int len)
 
 int sample_count = 0;
 int radio_message_count = 0;
+int max_sample = 0;
+int min_sample = 256;
 
 void loop()
 {
@@ -187,30 +194,44 @@ void loop()
     // save the last time
     sample_previousMillis = currentMillis;
   
-    float volts = 5.0 * analogRead(sensorPin) / 1023.0;
-    volts = max(volts, 1.25);
-    volts = min(volts, 3.05);
-    float level = (volts - 1.25) * 30.0;
-    speed_measured_filter[ smf_wr_idx ] = round(level);
+    int analogue_sample = analogRead(sensorPin);
+    analogue_sample = max(analogue_sample, 200);
+    analogue_sample -= 200;
+    analogue_sample = min(analogue_sample, 511);
+    speed_measured_filter[ smf_wr_idx ] = (analogue_sample >> 1);
     smf_wr_idx++;
     smf_wr_idx %= FILTER_SIZE;
+    //float volts = 5.0 * analogRead(sensorPin) / 1023.0;
+    //volts = max(volts, 1.24);
+    //volts = min(volts, 3.05);
+    //float level = (volts - 1.25) * 30.0;
+    //float level = volts * 100.0;
+    //speed_measured_filter[ smf_wr_idx ] = round(level);
+    max_sample = 0;
+    min_sample = 256;
     long avg_speed = 0;
     for(int idx = 0; idx < FILTER_SIZE; idx++)
     {
       avg_speed += speed_measured_filter[ idx ];
+      max_sample = max(speed_measured_filter[ idx ], max_sample);
+      min_sample = min(speed_measured_filter[ idx ], min_sample);
     }
     avg_speed /= FILTER_SIZE;
     
     speed_actual = avg_speed;    
     
-    
-    
-    
     sample_count++;
     
-    /*if (!(sample_count % 100))
+    /*if (!(sample_count % 20))
     {
-      Serial.println("100 samples");
+      Serial.print(avg_speed);
+      Serial.print(" : ");
+      Serial.print(max_sample);
+      Serial.print(" : ");
+      Serial.print(min_sample);
+      Serial.print(" : ");
+      Serial.print(analogue_sample);
+      Serial.println();
     }*/
   }
   
@@ -224,43 +245,40 @@ void loop()
     /* Only try sending if not already */
     if (next_radio_bit == NULL)
     {
-      if ((speed_demand > 0) && (speed_actual == 0))
+      if (ss_command != ss_status)
       {
         next_radio_bit = onoff_bits;
         radio_bit_countdown = 28;
         radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;     
       }
-      else if ((speed_demand == 0) && (speed_actual > 0))
+      else if (control_status == '1')
       {
-        next_radio_bit = onoff_bits;
-        radio_bit_countdown = 28;
-        radioTX_interval = VERY_LONG_DELAY_BETWEEN_MESSAGE_BURSTS;
-      }
-      else if (speed_demand > speed_actual)
-      {
-        next_radio_bit = faster_bits;
-        radio_bit_countdown = 28;
-        if (speed_demand > (speed_actual + 4))
+        if (speed_demand > speed_actual)
         {
-          radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          next_radio_bit = faster_bits;
+          radio_bit_countdown = 28;
+          if (speed_demand > (speed_actual + 20))
+          {
+            radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          }
+          else
+          {
+            radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          }
         }
-        else
+        else if (speed_demand < speed_actual)
         {
-          radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          next_radio_bit = slower_bits;
+          radio_bit_countdown = 28;
+          if (speed_actual > (speed_demand + 20))
+          {
+            radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          }
+          else
+          {
+            radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
+          }        
         }
-      }
-      else if (speed_demand < speed_actual)
-      {
-        next_radio_bit = slower_bits;
-        radio_bit_countdown = 28;
-        if (speed_actual > (speed_demand + 4))
-        {
-          radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
-        }
-        else
-        {
-          radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
-        }        
       }
       
       radioTX_burst_counter--;
@@ -271,6 +289,7 @@ void loop()
       else
       {
         radioTX_burst_counter = MESSAGE_BURST_COUNT;
+        ss_status = ss_command;
       }
     }
     else
@@ -287,21 +306,23 @@ void loop()
   {
     // save the last time
     serialTX_previousMillis = currentMillis;
-    int_to_chars(speed_demand, TX_buffer + 1);
-    int_to_chars(speed_actual, TX_buffer + 5);
-    cs = calc_checksum(TX_buffer, 9);
-    int_to_chars(cs, TX_buffer + 9);
+    TX_buffer[ 1 ] = ss_status;
+    TX_buffer[ 2 ] = control_status;
+    int_to_chars(speed_demand, TX_buffer + 4);
+    int_to_chars(speed_actual, TX_buffer + 8);
+    cs = calc_checksum(TX_buffer, 12);
+    int_to_chars(cs, TX_buffer + 12);
     Serial.print(TX_buffer);
   }
     
   // print the string when a newline arrives:
   if (stringComplete) 
   {
-    if (inputString.length() == 9)
+    if (inputString.length() == 12)
     {
-      inputString.toCharArray(RX_buffer, 9);
-      cs = calc_checksum(RX_buffer, 5);
-      byte cs2 = atoi(RX_buffer + 5);
+      inputString.toCharArray(RX_buffer, 12);
+      cs = calc_checksum(RX_buffer, 8);
+      byte cs2 = atoi(RX_buffer + 8);
       if (cs != cs2)
       {
         Serial.print("ERROR : Checksum should be ");
@@ -309,7 +330,10 @@ void loop()
       }
       else
       {
-        speed_demand = atoi(RX_buffer + 1);
+        ss_command = RX_buffer[ 1 ];
+        control_command = RX_buffer[ 2 ];
+        control_status = control_command;
+        speed_demand = atoi(RX_buffer + 4);
       }
     } 
     // Always clear the string 
