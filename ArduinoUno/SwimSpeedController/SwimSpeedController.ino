@@ -37,7 +37,8 @@ static int radioTX_burst_counter = MESSAGE_BURST_COUNT;
 
 static const long sample_interval = 10;
 static unsigned long sample_previousMillis = 0;
-static const int sensorPin = A0;
+static const int speed_sensor_pin = A0;
+static const int supply_voltage_sensor_pin = A1;
 
 static long radio_ISR_counter = 0;
 
@@ -73,7 +74,7 @@ void radioTimerISR()
 }
 
 static const int MODBUS_SLAVE_ID = 10;
-static const long MODBUS_BAUD_RATE = 9600; 
+static const long MODBUS_BAUD_RATE = 115200; 
 static ModbusSlave mbs;
 
 void setup()
@@ -134,8 +135,14 @@ static bool control_response = false;
 static word control_deadband = 10;
 static word control_slowband = 20;
 
-static word filter_coeff = 32000;
-static float filter_value = 0;
+static word A0_filter_coeff = 32000;
+static float A0_filter_value = 0;
+
+static word A1_filter_coeff = 32000;
+static float A1_filter_value = 0;
+
+static word supply_voltage = 0;
+
 
 void
 setBitState(word* reg, byte b, bool val)
@@ -167,12 +174,18 @@ void loop()
   {
     // save the last time
     sample_previousMillis = currentMillis;
+    float analogue_sample;
   
-    float analogue_sample = analogRead(sensorPin);
-    analogue_sample *= (0x8000 - filter_coeff);
-    filter_value = (analogue_sample + (filter_value * filter_coeff)) / 0x8000;
-    
-    speed_actual = filter_value;
+    analogue_sample = analogRead(speed_sensor_pin);
+    analogue_sample *= (0x8000 - A0_filter_coeff);
+    A0_filter_value = (analogue_sample + (A0_filter_value * A0_filter_coeff)) / 0x8000;
+    speed_actual = A0_filter_value;
+
+    analogue_sample = analogRead(supply_voltage_sensor_pin);
+    analogue_sample *= (0x8000 - A1_filter_coeff);
+    A1_filter_value = (analogue_sample + (A1_filter_value * A1_filter_coeff)) / 0x8000;
+    supply_voltage = A1_filter_value;
+
                     
     sample_count++;    
   }
@@ -191,13 +204,16 @@ void loop()
   mbs.registers[ 3 ] = speed_actual;
   mbs.registers[ 4 ] = control_deadband;
   mbs.registers[ 5 ] = control_slowband;
-  mbs.registers[ 6 ] = filter_coeff;
+  mbs.registers[ 6 ] = A0_filter_coeff;
+  mbs.registers[ 7 ] = supply_voltage;
+  mbs.registers[ 8 ] = A1_filter_coeff;
   mbs.task();
   command_register = mbs.registers[ 0 ];
   speed_demand = mbs.registers[ 2 ];
   control_deadband = mbs.registers[ 4 ];
   control_slowband = mbs.registers[ 5 ];
-  filter_coeff = min(mbs.registers[ 6 ], 0x7FFF);    
+  A0_filter_coeff = min(mbs.registers[ 6 ], 0x7FFF);    
+  A1_filter_coeff = min(mbs.registers[ 8 ], 0x7FFF);    
   start_stop_command = getBitState(&command_register, START_STOP_BIT);
   control_command = getBitState(&command_register, CONTROL_BIT);
     

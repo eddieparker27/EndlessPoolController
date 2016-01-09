@@ -128,7 +128,7 @@ void ModbusSlave::readRegisters(word startreg, word numregs)
   }
 
   //Check Address
-  if ((startreg + numregs) >= NUM_REGISTERS)
+  if ((startreg + numregs) > NUM_REGISTERS)
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
@@ -185,7 +185,7 @@ void ModbusSlave::writeMultipleRegisters(byte* frame, word startreg, word numreg
   }
 
   //Check Address
-  if ((startreg + numregs) >= NUM_REGISTERS)
+  if ((startreg + numregs) > NUM_REGISTERS)
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
