@@ -79,16 +79,18 @@ static const int NUM_REGISTERS = 10;
  
 class ModbusSlave
 {
- private:
-   Stream* _port;
-   long  _baud;
-   unsigned int _format;
-   byte  _slaveId;
-   word calcCrc(byte address, byte* pduframe, byte pdulen);
-   void readRegisters(word startreg, word numregs);
-   void writeSingleRegister(word reg, word value);
-   void writeMultipleRegisters(byte* frame,word startreg, word numoutputs, byte bytecount);
-   void exceptionResponse(byte fcode, byte excode);
+  private:
+    Stream* _port;
+    long  _baud;
+    unsigned int _format;
+    byte  _slaveId;
+    unsigned int _t15; // inter character time out
+    unsigned int _t35; // frame delay
+    word calcCrc(byte address, byte* pduframe, byte pdulen);
+    void readRegisters(word startreg, word numregs);
+    void writeSingleRegister(word reg, word value);
+    void writeMultipleRegisters(byte* frame,word startreg, word numoutputs, byte bytecount);
+    void exceptionResponse(byte fcode, byte excode);
       
   protected:
     byte _frame[ 256 ];

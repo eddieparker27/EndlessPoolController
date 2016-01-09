@@ -2,67 +2,81 @@
 
 ModbusSlave::ModbusSlave() 
 {
-
+  for(int i = 0; i < NUM_REGISTERS; i++)
+  {
+    registers[ i ] = 0;
+  }
 }
 
 bool 
 ModbusSlave::setSlaveId(byte slaveId)
 {
-   _slaveId = slaveId;
-   return true;
+ _slaveId = slaveId;
+ return true;
 }
 
 byte 
 ModbusSlave::getSlaveId() 
 {
-   return _slaveId;
+ return _slaveId;
 }
 
 bool 
-ModbusSlave::config(HardwareSerial* port, long baud, unsigned int format) 
+ModbusSlave::config(HardwareSerial* port, 
+                    long baud, 
+                    unsigned int format) 
 {
-   this->_port = port;
-   (*port).begin(baud, format);
-
-   delay(2000);
-
-   return true;
+ this->_port = port;
+ (*port).begin(baud, format);
+ 
+ delay(2000);
+ 
+ if (baud > 19200) 
+ {
+   _t15 = 750;
+   _t35 = 1750;
+ } 
+ else 
+ {
+   _t15 = 15000000/baud; // 1T * 1.5 = T1.5
+   _t35 = 35000000/baud; // 1T * 3.5 = T3.5
+ }
+ return true;
 }
 
 bool ModbusSlave::receive(byte* frame) 
 {
-   //first byte of frame = address
-   byte address = frame[0];
-   //Last two bytes = crc
-   unsigned int crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
+ //first byte of frame = address
+ byte address = frame[0];
+ //Last two bytes = crc
+ unsigned int crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
 
-   //Slave Check
-   if (address != 0xFF && address != this->getSlaveId()) 
-   {
-      return false;
-   }
+ //Slave Check
+ if (address != 0xFF && address != this->getSlaveId()) 
+ {
+   return false;
+ }
 
-   //CRC Check
-   if (crc != this->calcCrc(_frame[0], _frame+1, _len-3)) 
-   {
-      return false;
-   }
+ //CRC Check
+ if (crc != this->calcCrc(_frame[0], _frame+1, _len-3)) 
+ {
+   return false;
+ }
 
-   //PDU starts after first byte
-   //framesize PDU = framesize - address(1) - crc(2)
-   this->receivePDU(frame+1);
-   //No reply to Broadcasts
-   if (address == 0xFF) 
-   {
-     _reply = MB_REPLY_OFF;
-   }
-   return true;
+ //PDU starts after first byte
+ //framesize PDU = framesize - address(1) - crc(2)
+ this->receivePDU(frame+1);
+ //No reply to Broadcasts
+ if (address == 0xFF) 
+ {
+   _reply = MB_REPLY_OFF;
+ }
+ return true;
 }
 
 bool ModbusSlave::send(byte* frame) 
 {
   (*_port).write(frame, _len);
-
   (*_port).flush();
 }
 
@@ -114,7 +128,7 @@ void ModbusSlave::readRegisters(word startreg, word numregs)
   }
 
   //Check Address
-  if (numregs > NUM_REGISTERS) 
+  if ((startreg < 0x0001) || ((startreg + numregs - 1) > NUM_REGISTERS)) 
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
@@ -136,7 +150,7 @@ void ModbusSlave::readRegisters(word startreg, word numregs)
   while(numregs--) 
   {
     //retrieve the value from the register bank for the current register
-    val = this->registers[startreg + i];
+    val = this->registers[startreg + i - 1];
     //write the high byte of the register value
     _frame[2 + i * 2]  = val >> 8;
     //write the low byte of the register value
@@ -151,58 +165,100 @@ void ModbusSlave::writeSingleRegister(word reg, word value)
 {
   //No necessary verify illegal value (EX_ILLEGAL_VALUE) - because using word (0x0000 - 0x0FFFF)
   //Check Address and execute (reg exists?)
-  if (reg > (NUM_REGISTERS - 1)) 
+  if ((reg > NUM_REGISTERS) || (reg < 0x0001))
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
   }
+  this->registers[ reg ] = value;
   _reply = MB_REPLY_ECHO;
 }
 
-void ModbusSlave::writeMultipleRegisters(byte* frame, word startreg, word numoutputs, byte bytecount)
+void ModbusSlave::writeMultipleRegisters(byte* frame, word startreg, word numregs, byte bytecount)
 {
   //Check value
-  if (numoutputs < 0x0001 || numoutputs > 0x007B || bytecount != 2 * numoutputs)
+  if ((numregs < 0x0001) || (numregs > 0x007B) || (bytecount != (2 * numregs)))
   {
     this->exceptionResponse(MB_FC_WRITE_REGS, MB_EX_ILLEGAL_VALUE);
     return;
   }
 
-  //Check Address (startreg...startreg + numregs)
-  if (startreg < 
-  for (int k = 0; k < numoutputs; k++)
+  //Check Address
+  if ((startreg < 0x0001) || ((startreg + numregs - 1) > NUM_REGISTERS)) 
   {
-        if (!this->searchRegister(startreg + 40001 + k)) {
-            this->exceptionResponse(MB_FC_WRITE_REGS, MB_EX_ILLEGAL_ADDRESS);
-            return;
-        }
+    this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
+    return;
+  }
+  
+  //Clean frame buffer
+  _len = 5;
+  
+  _frame[0] = MB_FC_WRITE_REGS;
+  _frame[1] = startreg >> 8;
+  _frame[2] = startreg & 0x00FF;
+  _frame[3] = numregs >> 8;
+  _frame[4] = numregs & 0x00FF;
+
+  word val;
+  word i = 0;
+  while(numregs--) 
+  {
+    val = (word)frame[6 + i * 2] << 8 | (word)frame[7 + i * 2];
+    this->registers[startreg + i - 1] = val;
+    i++;
+  }
+
+  _reply = MB_REPLY_NORMAL;
+}
+
+bool ModbusSlave::sendPDU(byte* pduframe)
+{
+  //Send slaveId
+  (*_port).write(_slaveId);
+
+  //Send PDU
+  (*_port).write(pduframe, _len);
+
+  //Send CRC
+  word crc = calcCrc(_slaveId, _frame, _len);
+  (*_port).write(crc >> 8);
+  (*_port).write(crc & 0xFF);
+
+  (*_port).flush();
+  delayMicroseconds(_t35);
+}
+
+void ModbusSlave::task()
+{
+  _len = 0;
+
+  while ((*_port).available() > _len)
+  {
+    _len = (*_port).available();
+    delayMicroseconds(_t15);
+  }
+
+  if (_len == 0) return;
+
+  byte i;
+  for (i=0; i < _len; i++)
+  {
+    _frame[i] = (*_port).read();
+  }
+
+  if (this->receive(_frame)) 
+  {
+    if (_reply == MB_REPLY_NORMAL)
+    {
+      this->sendPDU(_frame);
     }
-
-    //Clean frame buffer
-    free(_frame);
-	_len = 5;
-    _frame = (byte *) malloc(_len);
-    if (!_frame) {
-        this->exceptionResponse(MB_FC_WRITE_REGS, MB_EX_SLAVE_FAILURE);
-        return;
+    else if (_reply == MB_REPLY_ECHO)
+    {
+      this->send(_frame);
     }
-
-    _frame[0] = MB_FC_WRITE_REGS;
-    _frame[1] = startreg >> 8;
-    _frame[2] = startreg & 0x00FF;
-    _frame[3] = numoutputs >> 8;
-    _frame[4] = numoutputs & 0x00FF;
-
-    word val;
-    word i = 0;
-	while(numoutputs--) {
-        val = (word)frame[6+i*2] << 8 | (word)frame[7+i*2];
-        this->Hreg(startreg + i, val);
-        i++;
-	}
-
-    _reply = MB_REPLY_NORMAL;
-}*/
+  }
+  _len = 0;
+}
 
 
 

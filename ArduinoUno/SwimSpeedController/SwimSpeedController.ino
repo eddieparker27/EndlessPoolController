@@ -9,7 +9,6 @@ static const unsigned long SHORT_DELAY_BETWEEN_MESSAGE_BURSTS = 1000; /* Millise
 static const unsigned long LONG_DELAY_BETWEEN_MESSAGE_BURSTS = 5000; /* Milliseconds */
 static const unsigned long VERY_LONG_DELAY_BETWEEN_MESSAGE_BURSTS = 10000; /* Milliseconds */
 static const unsigned long MESSAGE_BURST_COUNT = 4;
-static const unsigned int FILTER_SIZE = 500;
 static const char *slower =  "0111100010100001011010000101";
 static const char *faster =  "0111100010011001011010010101";
 static const char *onoff =   "0111100010001001011010000101";
@@ -36,30 +35,11 @@ static long radioTX_interval = DELAY_BETWEEN_MESSAGES;
 static unsigned long radioTX_previousMillis = 0;
 static int radioTX_burst_counter = MESSAGE_BURST_COUNT;
 
-
-static String inputString = "";         // a string to hold incoming data
-static boolean stringComplete = false;  // whether the string is complete
-
-static unsigned int speed_demand = 0;
-static unsigned int speed_actual = 0;
-
-static const long serialTX_interval = 500;
-static unsigned long serialTX_previousMillis = 0;
-static char TX_buffer[] = {'S', '0', '0', 'D', '0', '0', '0', 'A', '0', '0', '0', '#', '0', '0', '0', '\n', '\0'};
-static char RX_buffer[] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '0'};
-
 static const long sample_interval = 10;
 static unsigned long sample_previousMillis = 0;
 static const int sensorPin = A0;
-static word speed_measured_filter[ FILTER_SIZE ];
-static int smf_wr_idx = 0;
 
 static long radio_ISR_counter = 0;
-
-static char ss_command = '0';
-static char ss_status = '0';
-static char control_command = '0';
-static char control_status = '0';
 
 void radioTimerISR()
 {
@@ -93,7 +73,7 @@ void radioTimerISR()
 }
 
 static const int MODBUS_SLAVE_ID = 10;
-static const long MODBUS_BAUD_RATE = 38400; 
+static const long MODBUS_BAUD_RATE = 9600; 
 static ModbusSlave mbs;
 
 void setup()
@@ -107,20 +87,7 @@ void setup()
   
   mbs.setSlaveId( MODBUS_SLAVE_ID );
   mbs.config(&Serial, MODBUS_BAUD_RATE, SERIAL_8N1);
-  
-  Serial.begin(9600);
-  
-  
- 
-  
-  // reserve 200 bytes for the inputString:
-  inputString.reserve(200);
-  
-  for(int i = 0; i < FILTER_SIZE; i++)
-  {
-    speed_measured_filter[ i ] = 0;
-  }
-  
+     
   for(int i = 0; i < 28; i++)
   {
     if (slower[ i ] == '1')
@@ -150,53 +117,47 @@ void setup()
   }
 }
 
-void
-int_to_chars(int i, char *chars)
-{
-  chars[ 0 ] = '0' + i / 100;
-  i %= 100;
-  chars[ 1 ] = '0' + i / 10;
-  i %= 10;  
-  chars[ 2 ] = '0' + i;
-}
-
-byte
-calc_checksum(char *chars, int len)
-{
-  byte cs = 0;
-  while(len > 0)
-  {
-    cs ^= *chars;
-    chars++;
-    len--;
-  }
-  return cs;
-}
-
 int sample_count = 0;
 int radio_message_count = 0;
-int max_sample = 0;
-int min_sample = 256;
+static word command_register = 0;
+static word response_register = 0;
+static word speed_demand = 0;
+static word speed_actual = 0;
+static const byte START_STOP_BIT = 0;
+static const byte CONTROL_BIT = 1;
+
+static bool start_stop_command = false;
+static bool start_stop_response = false;
+static bool control_command = false;
+static bool control_response = false;
+
+static word control_deadband = 10;
+static word control_slowband = 20;
+
+static word filter_coeff = 32000;
+
+void
+setBitState(word* reg, byte b, bool val)
+{
+  word mask = (1 << b);
+  *reg &= ~mask;
+  if (val)
+  {
+    *reg |= mask;
+  }
+}
+
+bool
+getBitState(word* reg, byte b)
+{
+  return ((*reg & (1 << b)) != 0);
+}
+
 
 void loop()
 {
   unsigned long currentMillis = millis();
   byte cs;
-  
-  /*if (next_radio_bit == NULL)
-  {
-    radio_message_count++;
-    next_radio_bit = slower_bits;
-    radio_bit_countdown = 28;
-  }
-  
-  if ((radio_message_count % 50) == 0)
-  {
-    Serial.print(radio_message_count);
-    Serial.print(" : ");
-    Serial.println(currentMillis);
-  }*/
-  
   
   /*
   * Time for Samping Sensor
@@ -206,47 +167,38 @@ void loop()
     // save the last time
     sample_previousMillis = currentMillis;
   
-    int analogue_sample = analogRead(sensorPin);
-    analogue_sample = max(analogue_sample, 200);
-    analogue_sample -= 200;
-    analogue_sample = min(analogue_sample, 511);
-    speed_measured_filter[ smf_wr_idx ] = (analogue_sample >> 1);
-    smf_wr_idx++;
-    smf_wr_idx %= FILTER_SIZE;
-    //float volts = 5.0 * analogRead(sensorPin) / 1023.0;
-    //volts = max(volts, 1.24);
-    //volts = min(volts, 3.05);
-    //float level = (volts - 1.25) * 30.0;
-    //float level = volts * 100.0;
-    //speed_measured_filter[ smf_wr_idx ] = round(level);
-    max_sample = 0;
-    min_sample = 256;
-    long avg_speed = 0;
-    for(int idx = 0; idx < FILTER_SIZE; idx++)
-    {
-      avg_speed += speed_measured_filter[ idx ];
-      max_sample = max(speed_measured_filter[ idx ], max_sample);
-      min_sample = min(speed_measured_filter[ idx ], min_sample);
-    }
-    avg_speed /= FILTER_SIZE;
-    
-    speed_actual = avg_speed;    
-    
-    sample_count++;
-    
-    /*if (!(sample_count % 20))
-    {
-      Serial.print(avg_speed);
-      Serial.print(" : ");
-      Serial.print(max_sample);
-      Serial.print(" : ");
-      Serial.print(min_sample);
-      Serial.print(" : ");
-      Serial.print(analogue_sample);
-      Serial.println();
-    }*/
+    long analogue_sample = analogRead(sensorPin);
+    speed_actual = ((long)speed_actual * filter_coeff) + 
+                    ((long)analogue_sample * (0x8000 - filter_coeff)) >> 15;
+                    
+    speed_actual = analogue_sample;
+    sample_count++;    
   }
-  
+
+  /*
+  * Copy control command to response
+  */
+  control_response = control_command;
+
+  /*
+  * Handle the modbus comms
+  */
+  setBitState(&response_register, START_STOP_BIT, start_stop_response);
+  setBitState(&response_register, CONTROL_BIT, control_response);
+  mbs.registers[ 1 ] = response_register;  
+  mbs.registers[ 3 ] = speed_actual;
+  mbs.registers[ 4 ] = control_deadband;
+  mbs.registers[ 5 ] = control_slowband;
+  mbs.registers[ 6 ] = filter_coeff;
+  mbs.task();
+  command_register = mbs.registers[ 0 ];
+  speed_demand = mbs.registers[ 2 ];
+  control_deadband = mbs.registers[ 4 ];
+  control_slowband = mbs.registers[ 5 ];
+  filter_coeff = min(mbs.registers[ 6 ], 0x7FFF);    
+  start_stop_command = getBitState(&command_register, START_STOP_BIT);
+  control_command = getBitState(&command_register, CONTROL_BIT);
+    
   /*
   * Time for Radio Transmission
   */
@@ -257,19 +209,19 @@ void loop()
     /* Only try sending if not already */
     if (next_radio_bit == NULL)
     {
-      if (ss_command != ss_status)
+      if (start_stop_command != start_stop_response)
       {
         next_radio_bit = onoff_bits;
         radio_bit_countdown = 28;
         radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;     
       }
-      else if (control_status == '1')
+      else if (control_command)
       {
-        if (speed_demand > speed_actual)
+        if (speed_demand > (speed_actual + control_deadband))
         {
           next_radio_bit = faster_bits;
           radio_bit_countdown = 28;
-          if (speed_demand > (speed_actual + 20))
+          if (speed_demand > (speed_actual + control_slowband))
           {
             radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
           }
@@ -278,11 +230,11 @@ void loop()
             radioTX_interval = LONG_DELAY_BETWEEN_MESSAGE_BURSTS;        
           }
         }
-        else if (speed_demand < speed_actual)
+        else if (speed_demand < (speed_actual - control_deadband))
         {
           next_radio_bit = slower_bits;
           radio_bit_countdown = 28;
-          if (speed_actual > (speed_demand + 20))
+          if (speed_actual > (speed_demand + control_slowband))
           {
             radioTX_interval = SHORT_DELAY_BETWEEN_MESSAGE_BURSTS;        
           }
@@ -301,7 +253,7 @@ void loop()
       else
       {
         radioTX_burst_counter = MESSAGE_BURST_COUNT;
-        ss_status = ss_command;
+        start_stop_response = start_stop_command;
       }
     }
     else
@@ -314,7 +266,7 @@ void loop()
   /*
   * Time for Serial Transmission
   */
-  if(currentMillis - serialTX_previousMillis >= serialTX_interval) 
+  /*if(currentMillis - serialTX_previousMillis >= serialTX_interval) 
   {
     // save the last time
     serialTX_previousMillis = currentMillis;
@@ -325,10 +277,10 @@ void loop()
     cs = calc_checksum(TX_buffer, 12);
     int_to_chars(cs, TX_buffer + 12);
     Serial.print(TX_buffer);
-  }
+  }*/
     
   // print the string when a newline arrives:
-  if (stringComplete) 
+  /*if (stringComplete) 
   {
     if (inputString.length() == 12)
     {
@@ -351,28 +303,7 @@ void loop()
     // Always clear the string 
     inputString = "";
     stringComplete = false; 
-  }
+  }*/
 }
 
-/*
-  SerialEvent occurs whenever a new data comes in the
- hardware serial RX.  This routine is run between each
- time loop() runs, so using delay inside loop can delay
- response.  Multiple bytes of data may be available.
- */
-void serialEvent() 
-{
-  while (Serial.available()) 
-  {
-    // get the new byte:
-    char inChar = (char)Serial.read();
-    // add it to the inputString:
-    inputString += inChar;
-    // if the incoming character is a newline, set a flag
-    // so the main loop can do something about it:
-    if ((inChar == '\n') || (inChar == '\r'))
-    {
-      stringComplete = true;
-    }
-  }
-}
+
