@@ -1,4 +1,5 @@
 #include <TimerOne.h>
+#include "ModbusSlave.h"
 
 static const unsigned int RADIO_CYCLE_TIME = 350; /* Microsecs */
 static const unsigned int RADIO_SHORT_CYCLE_COUNT = 1; /* 1x the CYCLE TIME */
@@ -50,7 +51,7 @@ static char RX_buffer[] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
 static const long sample_interval = 10;
 static unsigned long sample_previousMillis = 0;
 static const int sensorPin = A0;
-static byte speed_measured_filter[ FILTER_SIZE ];
+static word speed_measured_filter[ FILTER_SIZE ];
 static int smf_wr_idx = 0;
 
 static long radio_ISR_counter = 0;
@@ -91,6 +92,10 @@ void radioTimerISR()
   digitalWrite(radio_pin, radio_pin_state);
 }
 
+static const int MODBUS_SLAVE_ID = 10;
+static const long MODBUS_BAUD_RATE = 38400; 
+static ModbusSlave mbs;
+
 void setup()
 {
   pinMode(10, OUTPUT);
@@ -100,7 +105,14 @@ void setup()
   Timer1.initialize(RADIO_CYCLE_TIME);
   Timer1.attachInterrupt( radioTimerISR );
   
+  mbs.setSlaveId( MODBUS_SLAVE_ID );
+  mbs.config(&Serial, MODBUS_BAUD_RATE, SERIAL_8N1);
+  
   Serial.begin(9600);
+  
+  
+ 
+  
   // reserve 200 bytes for the inputString:
   inputString.reserve(200);
   
