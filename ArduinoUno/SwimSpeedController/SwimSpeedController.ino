@@ -135,6 +135,7 @@ static word control_deadband = 10;
 static word control_slowband = 20;
 
 static word filter_coeff = 32000;
+static float filter_value = 0;
 
 void
 setBitState(word* reg, byte b, bool val)
@@ -167,11 +168,12 @@ void loop()
     // save the last time
     sample_previousMillis = currentMillis;
   
-    long analogue_sample = analogRead(sensorPin);
-    speed_actual = ((long)speed_actual * filter_coeff) + 
-                    ((long)analogue_sample * (0x8000 - filter_coeff)) >> 15;
+    float analogue_sample = analogRead(sensorPin);
+    analogue_sample *= (0x8000 - filter_coeff);
+    filter_value = (analogue_sample + (filter_value * filter_coeff)) / 0x8000;
+    
+    speed_actual = filter_value;
                     
-    speed_actual = analogue_sample;
     sample_count++;    
   }
 

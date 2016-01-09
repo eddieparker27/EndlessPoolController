@@ -128,7 +128,7 @@ void ModbusSlave::readRegisters(word startreg, word numregs)
   }
 
   //Check Address
-  if ((startreg < 0x0001) || ((startreg + numregs - 1) > NUM_REGISTERS)) 
+  if ((startreg + numregs) >= NUM_REGISTERS)
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
@@ -150,7 +150,7 @@ void ModbusSlave::readRegisters(word startreg, word numregs)
   while(numregs--) 
   {
     //retrieve the value from the register bank for the current register
-    val = this->registers[startreg + i - 1];
+    val = this->registers[startreg + i];
     //write the high byte of the register value
     _frame[2 + i * 2]  = val >> 8;
     //write the low byte of the register value
@@ -165,11 +165,12 @@ void ModbusSlave::writeSingleRegister(word reg, word value)
 {
   //No necessary verify illegal value (EX_ILLEGAL_VALUE) - because using word (0x0000 - 0x0FFFF)
   //Check Address and execute (reg exists?)
-  if ((reg > NUM_REGISTERS) || (reg < 0x0001))
+  if (reg >= NUM_REGISTERS)
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
   }
+    
   this->registers[ reg ] = value;
   _reply = MB_REPLY_ECHO;
 }
@@ -184,7 +185,7 @@ void ModbusSlave::writeMultipleRegisters(byte* frame, word startreg, word numreg
   }
 
   //Check Address
-  if ((startreg < 0x0001) || ((startreg + numregs - 1) > NUM_REGISTERS)) 
+  if ((startreg + numregs) >= NUM_REGISTERS)
   {
     this->exceptionResponse(MB_FC_READ_REGS, MB_EX_ILLEGAL_ADDRESS);
     return;
@@ -204,7 +205,7 @@ void ModbusSlave::writeMultipleRegisters(byte* frame, word startreg, word numreg
   while(numregs--) 
   {
     val = (word)frame[6 + i * 2] << 8 | (word)frame[7 + i * 2];
-    this->registers[startreg + i - 1] = val;
+    this->registers[startreg + i] = val;
     i++;
   }
 
