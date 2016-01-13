@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<div id="demo"><h2>Let AJAX change this text</h2></div>
+
+<button type="button" onclick="loadDoc()">Change Content</button>
+
+<button type="button" onclick="incSpeedDemand()">Increment Speed Demand</button>
+
+<script>
+var holding_registers = [];
+
+setInterval(loadDoc, 1000);
+
+function loadDoc() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (xhttp.readyState == 4 && xhttp.status == 200) {
+      document.getElementById("demo").innerHTML = xhttp.responseText;
+      holding_registers = JSON.parse( xhttp.responseText );
+      //setTimeout(loadDoc(), 1000);
+
+    }
+  };
+  xhttp.open("GET", "holding_registers.json", true);
+  xhttp.send();
+}
+
+function incSpeedDemand() {
+  holding_registers[ 2 ]++;
+  var xhttp = new XMLHttpRequest();
+  /*xhttp.onreadystatechange = function() {
+    if (xhttp.readyState == 4 && xhttp.status == 200) 
+    {
+      setTimeout(loadDoc(), 2000);
+    }
+  };*/
+  xhttp.open("PUT", "holding_registers?addr=2&value=" + holding_registers[ 2 ], true);
+  xhttp.send();
+}
+</script>
+
+</body>
+</html>
