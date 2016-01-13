@@ -1,0 +1,70 @@
+{
+  "_args": [
+    [
+      "modbus-stack",
+      "/home/eddie"
+    ]
+  ],
+  "_defaultsLoaded": true,
+  "_engineSupported": true,
+  "_from": "modbus-stack@*",
+  "_id": "modbus-stack@0.2.1",
+  "_inCache": true,
+  "_installable": true,
+  "_location": "/modbus-stack",
+  "_nodeVersion": "v0.4.0",
+  "_npmVersion": "0.3.12",
+  "_phantomChildren": {},
+  "_requested": {
+    "name": "modbus-stack",
+    "raw": "modbus-stack",
+    "rawSpec": "",
+    "scope": null,
+    "spec": "*",
+    "type": "range"
+  },
+  "_requiredBy": [
+    "#USER"
+  ],
+  "_resolved": "https://registry.npmjs.org/modbus-stack/-/modbus-stack-0.2.1.tgz",
+  "_shasum": "071643a8b28b2ec6e052c7376df80883ea7e1cb0",
+  "_shrinkwrap": null,
+  "_spec": "modbus-stack",
+  "_where": "/home/eddie",
+  "author": {
+    "email": "nathan@tootallnate.net",
+    "name": "Nathan Rajlich"
+  },
+  "dependencies": {
+    "bufferlist": ">= 0.0.6",
+    "put": "*",
+    "stream-stack": ">= 1.0.1"
+  },
+  "description": "A `StreamStack` implementation of the MODBUS protocol.",
+  "devDependencies": {
+    "colors": ">= 0.3.0",
+    "expresso": "*"
+  },
+  "directories": {},
+  "dist": {
+    "shasum": "071643a8b28b2ec6e052c7376df80883ea7e1cb0",
+    "tarball": "http://registry.npmjs.org/modbus-stack/-/modbus-stack-0.2.1.tgz"
+  },
+  "engines": {
+    "node": ">= 0.3.0"
+  },
+  "files": [],
+  "keywords": [
+    "MODBUS",
+    "StreamStack",
+    "protocol"
+  ],
+  "main": "./modbus-stack",
+  "name": "modbus-stack",
+  "optionalDependencies": {},
+  "readme": "ERROR: No README data found!",
+  "scripts": {
+    "test": "expresso test/test*.js"
+  },
+  "version": "0.2.1"
+}

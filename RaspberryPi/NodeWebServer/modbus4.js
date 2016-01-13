@@ -1,6 +1,6 @@
-var FC = require('modbus-stack').FUNCTION_CODES;
+var FC = require('./modbus-stack').FUNCTION_CODES;
 
-var client = require('modbus-stack/client').createClient(502);
+var client = require('./modbus-stack/client').createClient(502);
 
 var speed_demand = 1;
 
