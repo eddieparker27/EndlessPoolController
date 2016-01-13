@@ -69,8 +69,7 @@ static unsigned char buf[ BUF_LEN ];
 static unsigned char slave_id = DEFAULT_SLAVE_ID;
 #define DEFAULT_PORT_NUM    (502)
 static unsigned short port_num = DEFAULT_PORT_NUM;
-static sem_t tcp_request_available;
-static sem_t serial_response_available;
+
 static int msg_len;
 
 unsigned short
@@ -104,68 +103,9 @@ read_bytes(int sockfd, char* buf, int num)
       n = read(sockfd, buf, num);
       buf += n;
       num -= n;
-      result = (n >= 0);
+      result = (n > 0);
    } while ((result) && (num > 0));
    return result;
-}
-
-void*
-tcp_server_thread(void* params)
-{
-   int sockfd, newsockfd, portno;
-   socklen_t clilen;
-   struct sockaddr_in serv_addr, cli_addr;
-   bool result;
-   portno = 502;
-
-   sockfd = socket(AF_INET, SOCK_STREAM, 0);
-   if (sockfd < 0)
-   {
-      error("ERROR opening socket");
-   }
-
-   bzero((char *) &serv_addr, sizeof(serv_addr));
-   serv_addr.sin_family = AF_INET;
-   serv_addr.sin_addr.s_addr = INADDR_ANY;
-   serv_addr.sin_port = htons(portno);
-   if (bind(sockfd,
-            (struct sockaddr *) &serv_addr,
-            sizeof(serv_addr)) < 0)
-   {
-      error("ERROR on binding");
-   }
-   listen(sockfd, 5);
-
-   while(TRUE)
-   {
-      clilen = sizeof(cli_addr);
-      newsockfd = accept(sockfd,
-                        (struct sockaddr *) &cli_addr,
-                        &clilen);
-      if (newsockfd < 0)
-      {
-         error("ERROR on accept");
-      }
-
-      result = read_bytes(newsockfd, buf, (MBAP_HEADER_LEN - 1));
-      if (result)
-      {
-         msg_len = (buf[ 4 ] << 8) | (buf[ 5 ]);
-         result = read_bytes(newsockfd, buf, msg_len);
-         if (result)
-         {
-            /* Post the request */
-            sem_post(&tcp_request_available);
-            /* Wait for the response */
-            sem_wait(&serial_response_available);
-         }
-      }
-      if (!result)
-      {
-         error("ERROR reading from socket");
-      }
-      close(newsockfd);
-   }
 }
 
 int
@@ -173,12 +113,17 @@ main(int argc, char *argv[])
 {
    int res;
    int i;
-   char str[ 512 ];
    int USB = -1;
    pthread_t tid;
    int r;
    int c;
-   unsigned short crc1, crc2;
+   unsigned short crc;
+   int sockfd, newsockfd;
+   socklen_t clilen;
+   struct sockaddr_in serv_addr, cli_addr;
+   bool result;
+   unsigned char mbap_unit_id;
+   int enable = 1;
 
    opterr = 0;
    while ((c = getopt (argc, argv, "s:p:")) != -1)
@@ -199,134 +144,186 @@ main(int argc, char *argv[])
           slave_id, port_num);
 
 
-   while(USB < 0)
+   sockfd = socket(AF_INET, SOCK_STREAM, 0);
+   if (sockfd < 0)
    {
-      USB = open("/dev/ttyUSB0", O_RDWR | O_NONBLOCK | O_NDELAY);
-
-      if (USB < 0)
-      {
-         printf("Failed to open /dev/ttyUSB0 - error = %d (%s)\n", errno, strerror(errno));
-      }
-      sleep(5);
-   }
-   sleep(5);
-
-   struct termios tty;
-   memset(&tty, 0, sizeof(tty));
-
-   if(tcgetattr(USB, &tty) != 0)
-   {
-      printf("Error %d from tcgetattr: %s\n", errno, strerror(errno));
-   }
-
-   cfsetospeed(&tty, B115200);
-   cfsetispeed(&tty, B115200);
- 
-   tty.c_cflag     &=  ~PARENB;
-   tty.c_cflag     &=  ~CSTOPB;
-   tty.c_cflag     &=  ~CSIZE;
-   tty.c_cflag     |=  CS8;
-   tty.c_cflag     &=  ~CRTSCTS;
-   tty.c_lflag     =  0;
-   tty.c_oflag     =  0;
-   tty.c_cc[VMIN]  =  0;
-   tty.c_cc[VTIME] =  0;
-
-   tty.c_cflag     |=  CREAD | CLOCAL;
-   tty.c_iflag     &=  ~(IXON | IXOFF | IXANY);
-   tty.c_lflag     &=  ~(ICANON | ECHO | ECHOE | ISIG);
-   tty.c_oflag     &=  ~OPOST;
-
-   tcflush(USB, TCIFLUSH);
-
-   if (tcsetattr(USB, TCSANOW, &tty) != 0)
-   {
-      printf("Error %d from tcsetattr: %s\n", errno, strerror(errno));
-   }
-
-   tcflush(USB, TCIFLUSH);
-
-
-   if (sem_init(&tcp_request_available, 0, 0) != 0)
-   {
-      printf("TCP Request Semaphore init failed\n");
+      printf("ERROR opening socket - error = %d (%s)\n", errno, strerror(errno));
       return 1;
    }
-   if (sem_init(&serial_response_available, 0, 0) != 0)
-   {
-      printf("Serial Response Semaphore init failed\n");
-      return 1;
-   }
-
-
-   r = pthread_create(&tid, NULL, &tcp_server_thread, NULL);
-   if (r != 0)
-   {
-      printf("Can't create WebServer thread\n");
-      return r;
-   }
-
    
+   if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
+   {
+      printf("setsockopt(SO_REUSEADDR) failed - error = %d (%s)\n", errno, strerror(errno));
+   }
+
+   bzero((char *) &serv_addr, sizeof(serv_addr));
+   serv_addr.sin_family = AF_INET;
+   serv_addr.sin_addr.s_addr = INADDR_ANY;
+   serv_addr.sin_port = htons(port_num);
+
+   if (bind(sockfd,
+            (struct sockaddr *) &serv_addr,
+            sizeof(serv_addr)) < 0)
+   {
+      printf("ERROR on binding - error = %d (%s)\n", errno, strerror(errno));
+      return(1);
+   }
+   listen(sockfd, 5);
+
    while(TRUE)
    {
-      sem_wait(&tcp_request_available);
-      printf("Got a request in serial land\n");
-      buf[ 0 ] = slave_id;
-      crc1 = calc_crc(slave_id, buf + 1, msg_len - 1);
-      buf[ msg_len++ ] = (crc1 >> 8);
-      buf[ msg_len++ ] = (crc1 & 0xFF);
-      for(i = 0; i < msg_len; i++)
-      {
-         printf("[%02x]", buf[ i ]);
-      }
-      printf("\n");
-
-      res = write(USB, buf, msg_len);
-      if (res != msg_len)
-      {
-         printf("Failed to write message to serial port!\n");
-      }
-      else
-      {
-         usleep(500000);
-         msg_len = 0;
-         res = read(USB, buf, BUF_LEN);
-         printf("Read %d chars\n", res);         
-         if (res > 0)
+      if (USB < 0)
+      {         
+         while(USB < 0)
          {
-            msg_len = res;
+            USB = open("/dev/ttyUSB0", O_RDWR | O_NONBLOCK | O_NDELAY);
 
-            for(i = 0; i < msg_len; i++)
+            if (USB < 0)
             {
-               printf("[%02x]", buf[ i ]);
+               printf("Failed to open /dev/ttyUSB0 - error = %d (%s)\n", errno, strerror(errno));
             }
-            printf("\n");
-
-
-            crc1 = calc_crc(buf[ 0 ], buf + 1, msg_len - 1);
-            crc2 = (buf[ msg_len - 2 ] << 8) | buf[ msg_len - 1];
-            if (crc1 == crc2)
-            {
-               printf("Checksums match!\n");
-            }
-            else
-            {
-               printf("CRC1 = 0x%02x CRC2 = 0x%02x\n", crc1, crc2);
-            }
+            sleep(5);
          }
-      }
-      
+         sleep(5);
 
-      sem_post(&serial_response_available);
+         struct termios tty;
+         memset(&tty, 0, sizeof(tty));
 
-      /*res = read(USB, str, 512);
-      if (res < 0)
-      {
-         printf("Failed to read data\n");
+         if(tcgetattr(USB, &tty) != 0)
+         {
+            printf("Error %d from tcgetattr: %s\n", errno, strerror(errno));
+         }
+
+         cfsetospeed(&tty, B115200);
+         cfsetispeed(&tty, B115200);
+ 
+         tty.c_cflag     &=  ~PARENB;
+         tty.c_cflag     &=  ~CSTOPB;
+         tty.c_cflag     &=  ~CSIZE;
+         tty.c_cflag     |=  CS8;
+         tty.c_cflag     &=  ~CRTSCTS;
+         tty.c_lflag     =  0;
+         tty.c_oflag     =  0;
+         tty.c_cc[VMIN]  =  0;
+         tty.c_cc[VTIME] =  0;
+
+         tty.c_cflag     |=  CREAD | CLOCAL;
+         tty.c_iflag     &=  ~(IXON | IXOFF | IXANY);
+         tty.c_lflag     &=  ~(ICANON | ECHO | ECHOE | ISIG);
+         tty.c_oflag     &=  ~OPOST;
+
+         tcflush(USB, TCIFLUSH);
+
+         if (tcsetattr(USB, TCSANOW, &tty) != 0)
+         {
+            printf("Error %d from tcsetattr: %s\n", errno, strerror(errno));
+         } 
+
+         tcflush(USB, TCIFLUSH);
       }
       else
       {
+         printf("Now accepting...");
+         clilen = sizeof(cli_addr);
+         newsockfd = accept(sockfd,
+                           (struct sockaddr *) &cli_addr,
+                           &clilen);
+         if (newsockfd < 0)
+         {
+            error("ERROR on accept");
+         }
+     
+         printf("connection accepted\n");
+         do
+         {
+            printf("Waiting for incoming request\n");
+            result = read_bytes(newsockfd, buf, (MBAP_HEADER_LEN - 1));
+            if (result)
+            {
+               msg_len = (buf[ 4 ] << 8) | (buf[ 5 ]);
+               result = read_bytes(newsockfd, buf, msg_len);
+               if (result)
+               {
+                  mbap_unit_id = buf[ 0 ];
+                  buf[ 0 ] = slave_id;
+                  crc = calc_crc(slave_id, buf + 1, msg_len - 1);
+                  buf[ msg_len++ ] = (crc >> 8);
+                  buf[ msg_len++ ] = (crc & 0xFF);
+
+                  printf("SER REQ :: ");
+                  for(i = 0; i < msg_len; i++)
+                  {
+                     printf("[%02x]", buf[ i ]);
+                  }
+                  printf("\n");
+
+                  res = write(USB, buf, msg_len);
+                  if (res != msg_len)
+                  {
+                     result = FALSE;
+                     printf("Failed to write message to serial port!\n");
+                  }
+                  else
+                  {
+                     usleep(500000);
+                     msg_len = 0;
+                     res = read(USB, buf, BUF_LEN);
+                     printf("Read %d chars\n", res);         
+                     if (res > 0)
+                     {
+                        msg_len = res;
+                        
+                        printf("SER RSP :: ");
+                        for(i = 0; i < msg_len; i++)
+                        {
+                           printf("[%02x]", buf[ i ]);
+                        }
+                        printf("\n");
+
+                        crc = calc_crc(buf[ 0 ], buf + 1, msg_len - 1);
+                        if (crc != 0)
+                        {
+                           printf("CRC mismatch!!!\n");
+                        }
+                        else
+                        {
+                           buf[ 0 ] = mbap_unit_id;
+                           msg_len -= 2; /* Knock off crc */
+                           memcpy(buf + (MBAP_HEADER_LEN - 1), buf, msg_len);
+                           bzero(buf, (MBAP_HEADER_LEN - 1));                           
+                           buf[ 1 ] = 1;
+                           buf[ 4 ] = (msg_len >> 8);
+                           buf[ 5 ] = msg_len & 0xFF;
+                           msg_len += (MBAP_HEADER_LEN - 1); /* Add on MBAP */
+
+                           printf("TCP RSP :: ");
+                           for(i = 0; i < msg_len; i++)
+                           {
+                              printf("[%02x]", buf[ i ]);
+                           }
+                           printf("\n"); 
+
+                           res = write(newsockfd, buf, msg_len);
+                           if (res != msg_len)
+                           {
+                              result = FALSE;
+                           }
+                        }
+                     }
+                     else
+                     {
+                        result = FALSE;
+                     }
+                  }          
+               }
+            }
+         } while(result);
+         
+         printf("Resetting all connections\n");
+         close(USB);
+         USB = -1;
+         close(newsockfd);
+         newsockfd = -1;
       }
-      res = write(USB, str, 12);*/
    }
 }
