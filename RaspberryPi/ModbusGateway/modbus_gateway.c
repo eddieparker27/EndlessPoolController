@@ -65,10 +65,11 @@ static unsigned char buf[ BUF_LEN ];
 
 #define MBAP_HEADER_LEN     (7)
 
-#define DEFAULT_SLAVE_ID    (1)
-static unsigned char slave_id = DEFAULT_SLAVE_ID;
+#define DEFAULT_SLAVE_ID    (10)
 #define DEFAULT_PORT_NUM    (502)
-static unsigned short port_num = DEFAULT_PORT_NUM;
+#define DEFAULT_BAUD_RATE   (115200)
+#define INTER_CHAR_DELAY    (2000) // micro seconds
+#define RESPONSE_TIMEOUT    (1000000) // micro seconds
 
 static int msg_len;
 
@@ -124,9 +125,12 @@ main(int argc, char *argv[])
    bool result;
    unsigned char mbap_unit_id;
    int enable = 1;
+   unsigned char slave_id = DEFAULT_SLAVE_ID;
+   unsigned short port_num = DEFAULT_PORT_NUM;
+   int baud_rate = DEFAULT_BAUD_RATE;
 
    opterr = 0;
-   while ((c = getopt (argc, argv, "s:p:")) != -1)
+   while ((c = getopt (argc, argv, "s:p:b:")) != -1)
    {
       switch (c)
       {
@@ -136,13 +140,39 @@ main(int argc, char *argv[])
       case 'p':
         port_num = atoi(optarg);
         break;
+      case 'b':
+        baud_rate = atoi(optarg);
       default:
         abort ();
       }
    }
-   printf ("modbus_gateway slave_id = %d, port_num = %d\n",
-          slave_id, port_num);
+   printf ("modbus_gateway slave_id = %d, port_num = %d baud_rate = %d\n",
+          slave_id, port_num, baud_rate);
 
+   switch(baud_rate)
+   {
+   case 9600:
+      baud_rate = B9600;
+      break;
+   case 19200:
+      baud_rate = B19200;
+      break;
+   case 38400:
+      baud_rate = B38400;
+      break;
+   case 57600:
+      baud_rate = B57600;
+      break;
+   case 115200:
+      baud_rate = B115200;
+      break;
+   case 230400:
+      baud_rate = B230400;
+      break;
+   default:
+      printf("Unsupported baud rate. Setting to 115200\n");
+      baud_rate = B115200;
+   }
 
    sockfd = socket(AF_INET, SOCK_STREAM, 0);
    if (sockfd < 0)
@@ -194,8 +224,8 @@ main(int argc, char *argv[])
             printf("Error %d from tcgetattr: %s\n", errno, strerror(errno));
          }
 
-         cfsetospeed(&tty, B115200);
-         cfsetispeed(&tty, B115200);
+         cfsetospeed(&tty, baud_rate);
+         cfsetispeed(&tty, baud_rate);
  
          tty.c_cflag     &=  ~PARENB;
          tty.c_cflag     &=  ~CSTOPB;
@@ -265,9 +295,36 @@ main(int argc, char *argv[])
                   }
                   else
                   {
-                     usleep(500000);
+                     res = 0;
+                     /*
+                     * Wait for first char
+                     */
+                     int counter = RESPONSE_TIMEOUT / INTER_CHAR_DELAY;
+                     i = 0;
+                     while((counter--) && (i == 0))
+                     {
+                        i = read(USB, buf, BUF_LEN);
+                        usleep(INTER_CHAR_DELAY);
+                     }
+                     if (i < 0)
+                     {
+                        i = 0;
+                     }
+                     /*
+                     * Get rest of message
+                     */
+                     while(i != 0)
+                     {
+                        res += i;
+                        i = read(USB, buf + res, BUF_LEN - res);
+                        if (i < 0)
+                        {
+	                   i = 0;
+                           res = 0;
+	                }
+                        usleep(INTER_CHAR_DELAY);
+                     }
                      msg_len = 0;
-                     res = read(USB, buf, BUF_LEN);
                      printf("Read %d chars\n", res);         
                      if (res > 0)
                      {
