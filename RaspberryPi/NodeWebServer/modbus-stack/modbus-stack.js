@@ -66,7 +66,6 @@ function ModbusRequestStack(stream) {
   StreamStack.call(this, stream, {
     data: this._onData
   });
-  //console.log("New Buffer List");
   this.bufferlist = new BufferList();
   if (this.stream._reqNum) {
     this.stream._reqNum++;
