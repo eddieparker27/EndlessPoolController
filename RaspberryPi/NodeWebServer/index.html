@@ -1,5 +1,47 @@
 <!DOCTYPE html>
 <html>
+<head>
+   <style>
+      body 
+      {
+         background-image: url("water.png");
+         background-repeat: repeat;
+      }
+   </style>
+
+   <script type="text/javascript" src="loader.js"></script>
+   <script type="text/javascript">
+      google.charts.load('current', {'packages':['corechart']});
+      google.charts.setOnLoadCallback(drawChart);
+
+      function drawChart() 
+      {
+         var tdata = new google.visualization.DataTable(); 
+         tdata.addColumn('datetime', 'Time');
+         tdata.addColumn('number', 'Demand');
+         tdata.addColumn('number', 'Actual');
+         
+         var list_ele = list_head;         
+         while(list_ele)
+         {
+            tdata.addRow([new Date(list_ele.date), Number(list_ele.demand), Number(list_ele.actual)]);
+            list_ele = list_ele.next;
+         }
+
+         var options = 
+         {
+            title: 'Speeds',
+            curveType: 'function',
+            legend: { position: 'bottom' }
+         };
+
+         var chart = new google.visualization.LineChart(document.getElementById('curve_chart'));
+
+         chart.draw(tdata, options);
+      }
+   </script>
+
+</head>
 <body>
 
 <div id="demo"><h2>Let AJAX change this text</h2></div>
@@ -8,36 +50,91 @@
 
 <button type="button" onclick="incSpeedDemand()">Increment Speed Demand</button>
 
-<script>
-var holding_registers = [];
+<div id="curve_chart" style="width: 900px; height: 500px"></div>
 
-setInterval(loadDoc, 1000);
+<script>
+var system_state = 
+{
+   control_active : false,
+   supply_power_on : false,
+   speed_demand : 0,
+   speed_actual : 0,
+   speed_actual_volts : 0,
+   speed_demand_volts : 0,
+   supply_power_volts : 0,
+   speed_actual_filter_COF : 0,
+   supply_power_filter_COF : 0,
+   control_deadband_volts : 0,
+   control_slowband_volts : 0
+};
+
+var list_head = null;
+var list_tail = null;
+var list_length = 0;
+var list_length_max = 100;
+
+//setInterval(loadDoc, 1000);
 
 function loadDoc() {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
     if (xhttp.readyState == 4 && xhttp.status == 200) {
       document.getElementById("demo").innerHTML = xhttp.responseText;
-      holding_registers = JSON.parse( xhttp.responseText );
-      //setTimeout(loadDoc(), 1000);
+      system_state = JSON.parse( xhttp.responseText );
+
+//console.log(xhttp.responseText);
+//console.log(system_state);
+      
+      list_length++;
+      var d = new Date();
+
+      var list_ele = {
+         date : d.getTime(),
+         demand : system_state.speed_demand_volts,
+         actual : system_state.speed_actual_volts,
+         prev : list_tail,
+         next : null};
+
+     if (!list_head)
+     {
+        list_head = list_ele;
+     }
+     else if (list_length > list_length_max)
+     {
+        list_head = list_head.next;
+        list_head.prev = null;
+        list_length--;
+     }
+
+     if (list_tail)
+     {
+        list_tail.next = list_ele;
+     }
+     list_tail = list_ele;
+
+     drawChart();
 
     }
   };
-  xhttp.open("GET", "holding_registers.json", true);
+  xhttp.open("GET", "system_state", true);
   xhttp.send();
 }
 
-function incSpeedDemand() {
-  holding_registers[ 2 ]++;
+function incSpeedDemand() 
+{
   var xhttp = new XMLHttpRequest();
-  /*xhttp.onreadystatechange = function() {
+  xhttp.onreadystatechange = function() {
     if (xhttp.readyState == 4 && xhttp.status == 200) 
     {
-      setTimeout(loadDoc(), 2000);
+      
     }
-  };*/
-  xhttp.open("PUT", "holding_registers?addr=2&value=" + holding_registers[ 2 ], true);
-  xhttp.send();
+  };
+  xhttp.open("PUT", "/system_state/speed_demand_volts", true);
+  xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+  system_state.speed_demand_volts += 0.1;
+  var put_data = JSON.stringify(system_state.speed_demand_volts);
+  xhttp.setRequestHeader("Content-Length", put_data.length);
+  xhttp.send(put_data);
 }
 </script>
 
