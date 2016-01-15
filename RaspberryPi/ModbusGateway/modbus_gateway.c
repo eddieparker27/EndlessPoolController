@@ -303,7 +303,7 @@ main(int argc, char *argv[])
                      i = 0;
                      while((counter--) && (i == 0))
                      {
-                        i = read(USB, buf, BUF_LEN);
+                        i = read(USB, buf + (MBAP_HEADER_LEN - 1), BUF_LEN);
                         usleep(INTER_CHAR_DELAY);
                      }
                      if (i < 0)
@@ -316,7 +316,9 @@ main(int argc, char *argv[])
                      while(i != 0)
                      {
                         res += i;
-                        i = read(USB, buf + res, BUF_LEN - res);
+                        i = read(USB, 
+                                 buf + res + (MBAP_HEADER_LEN - 1),
+                                 BUF_LEN - res - (MBAP_HEADER_LEN - 1));
                         if (i < 0)
                         {
 	                   i = 0;
@@ -331,22 +333,23 @@ main(int argc, char *argv[])
                         msg_len = res;
                         
                         printf("SER RSP :: ");
-                        for(i = 0; i < msg_len; i++)
+                        for(i = MBAP_HEADER_LEN - 1; i < (msg_len + MBAP_HEADER_LEN - 1); i++)
                         {
                            printf("[%02x]", buf[ i ]);
                         }
                         printf("\n");
 
-                        crc = calc_crc(buf[ 0 ], buf + 1, msg_len - 1);
+                        crc = calc_crc(buf[ MBAP_HEADER_LEN - 1 ], 
+                                       buf + MBAP_HEADER_LEN, 
+                                       msg_len - 1);
                         if (crc != 0)
                         {
                            printf("CRC mismatch!!!\n");
                         }
                         else
                         {
-                           buf[ 0 ] = mbap_unit_id;
+                           buf[ MBAP_HEADER_LEN - 1 ] = mbap_unit_id;
                            msg_len -= 2; /* Knock off crc */
-                           memcpy(buf + (MBAP_HEADER_LEN - 1), buf, msg_len);
                            bzero(buf, (MBAP_HEADER_LEN - 1));                           
                            buf[ 1 ] = 1;
                            buf[ 4 ] = (msg_len >> 8);
