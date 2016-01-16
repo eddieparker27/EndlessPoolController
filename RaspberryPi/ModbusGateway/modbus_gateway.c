@@ -345,6 +345,7 @@ main(int argc, char *argv[])
                         if (crc != 0)
                         {
                            printf("CRC mismatch!!!\n");
+						   result = FALSE;
                         }
                         else
                         {
