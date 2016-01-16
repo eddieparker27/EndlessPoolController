@@ -5,7 +5,7 @@ var http = require("http"),
     url = require("url"),
     path = require("path"),
     fs = require("fs"),
-    port = process.argv[2] || 8888;
+    port = process.argv[2] || 80;
 
 
 var system_state = 
@@ -54,7 +54,7 @@ function read_registers()
       client.request(FC.READ_HOLDING_REGISTERS, 0, 10, function(err, response) {
          modbus_busy = false;
          if (err) throw err;
-         //console.log(response);
+         console.log(response);
          for(k = 0; k < 10; k++)
          {
             holding_registers[ k ] = response[ k ];
@@ -64,9 +64,12 @@ function read_registers()
          system_state.speed_actual_volts = holding_registers[ 3 ] * 5.0 / 1024;
          system_state.control_deadband_volts = holding_registers[ 4 ] * 5.0 / 1024;
          system_state.control_slowband_volts = holding_registers[ 5 ] * 5.0 / 1024;
-         system_state.speed_actual_filter_COF = Math.log(holding_registers[ 6 ] / 0x8000) * 100 / (-2.0 * Math.PI);
+         system_state.speed_actual_filter_COF = Math.log(holding_registers[ 6 ] / 32768.0) * 100 / (-2.0 * Math.PI);
          system_state.supply_power_volts = holding_registers[ 7 ] * 5.0 / 1024;
-         system_state.supply_power_filter_COF = Math.log(holding_registers[ 8 ] / 0x8000) * 100 / (-2.0 * Math.PI);
+         system_state.supply_power_filter_COF = Math.log(holding_registers[ 8 ] / 32768.0) * 100 / (-2.0 * Math.PI);
+
+
+console.log(holding_registers);
      });
    });
 }
@@ -109,6 +112,21 @@ http.createServer(function(request, response) {
                  success = true;
               }
            }
+           else if (uri === "/system_state/speed_actual_filter_COF")
+           {
+              address = 6;
+              value = JSON.parse(body);
+              if ((value) && (value >= 0.0) && (value <= 50.0))
+              {
+                 value *= -2.0 * Math.PI / 100.0;
+                 value = Math.exp(value) * 32768.0;
+                 value = Math.round(value);
+                 value = Math.max(0, value);
+                 value = Math.min(0x8000, value);
+                 success = true;
+              }
+           }
+              
 
            if (success)
            {
