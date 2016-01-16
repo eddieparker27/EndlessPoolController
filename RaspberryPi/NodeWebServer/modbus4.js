@@ -16,15 +16,31 @@ var system_state =
    speed_actual : 0,
    speed_actual_volts : 0,
    speed_demand_volts : 0,
+   speed_actual_register : 0,
+   speed_demand_register : 0,
    supply_power_volts : 0,
-   speed_actual_filter_COF : 0,
-   supply_power_filter_COF : 0,
-   control_deadband_volts : 0,
-   control_slowband_volts : 0
+   speed_actual_filter_COF : 0.02, //Hz
+   supply_power_filter_COF : 0.02, //Hz
+   control_deadband_volts : 0.03, //Volts
+   control_slowband_volts : 0.1  
 };
-   
 
 var holding_registers = [];
+var HOLDING_REGISTER_ADDRESS = 
+{
+    control : 0,
+    response : 1,
+    speed_demand : 2,
+    speed_actual : 3,
+    control_deadband : 4,
+    control_slowband : 5,
+    speed_actual_filter_COF : 6,
+    supply_power : 7,
+    supply_power_filter_COF : 8 
+}
+
+var START_STOP_BIT = 0x0001;
+var CONTROL_ACTIVE_BIT = 0x0002;
 
 setInterval(service_modbus_queue, 100);
 
@@ -54,22 +70,26 @@ function read_registers()
       client.request(FC.READ_HOLDING_REGISTERS, 0, 10, function(err, response) {
          modbus_busy = false;
          if (err) throw err;
-         console.log(response);
+         //console.log(response);
          for(k = 0; k < 10; k++)
          {
             holding_registers[ k ] = response[ k ];
          }
-         system_state.control_active = ((holding_registers[ 1 ] & 0x0002) != 0);
-         system_state.speed_demand_volts = holding_registers[ 2 ] * 5.0 / 1024;
-         system_state.speed_actual_volts = holding_registers[ 3 ] * 5.0 / 1024;
-         system_state.control_deadband_volts = holding_registers[ 4 ] * 5.0 / 1024;
-         system_state.control_slowband_volts = holding_registers[ 5 ] * 5.0 / 1024;
-         system_state.speed_actual_filter_COF = Math.log(holding_registers[ 6 ] / 32768.0) * 100 / (-2.0 * Math.PI);
-         system_state.supply_power_volts = holding_registers[ 7 ] * 5.0 / 1024;
-         system_state.supply_power_filter_COF = Math.log(holding_registers[ 8 ] / 32768.0) * 100 / (-2.0 * Math.PI);
+         system_state.control_active = ((holding_registers[HOLDING_REGISTER_ADDRESS.response] & CONTROL_ACTIVE_BIT) != 0);
+         system_state.speed_demand_register = holding_registers[HOLDING_REGISTER_ADDRESS.speed_demand];
+         system_state.speed_actual_register = holding_registers[HOLDING_REGISTER_ADDRESS.speed_actual];
+         system_state.speed_demand_volts = system_state.speed_demand_register * 5.0 / 1024;
+         system_state.speed_actual_volts = system_state.speed_actual_register * 5.0 / 1024;
+         system_state.speed_demand = Math.round((Math.min(Math.max(system_state.speed_demand_volts, 1.25), 3.05) - 1.25) * 30) + 1;
+         system_state.speed_actual = Math.round((Math.min(Math.max(system_state.speed_actual_volts, 1.25), 3.05) - 1.25) * 30) + 1;
+         system_state.control_deadband_volts = holding_registers[HOLDING_REGISTER_ADDRESS.control_deadband] * 5.0 / 1024;
+         system_state.control_slowband_volts = holding_registers[ HOLDING_REGISTER_ADDRESS.control_slowband ] * 5.0 / 1024;
+         system_state.speed_actual_filter_COF = Math.log(holding_registers[ HOLDING_REGISTER_ADDRESS.speed_actual_filter_COF ] / 32768.0) * 100 / (-2.0 * Math.PI);
+         system_state.supply_power_volts = holding_registers[ HOLDING_REGISTER_ADDRESS.supply_power ] * 5.0 / 1024;
+         system_state.supply_power_filter_COF = Math.log(holding_registers[ HOLDING_REGISTER_ADDRESS.supply_power_filter_COF ] / 32768.0) * 100 / (-2.0 * Math.PI);
 
 
-console.log(holding_registers);
+//console.log(holding_registers);
      });
    });
 }
@@ -99,9 +119,17 @@ http.createServer(function(request, response) {
            var success = false;
            var address = 0;
            var value = 0;
-           if (uri === "/system_state/speed_demand_volts")
+           if (uri === "/system_state/speed_demand_register") {
+               address = HOLDING_REGISTER_ADDRESS.speed_demand;
+               value = JSON.parse(body);
+               if ((value) && (value >= 0) && (value <= 1023)) {
+                   value = Number(value);
+                   success = true;
+               }
+           }
+           else if (uri === "/system_state/speed_demand_volts")
            {              
-              address = 2;
+              address = HOLDING_REGISTER_ADDRESS.speed_demand;
               value = JSON.parse(body);
               if ((value) && (value >= 0.0) && (value <= 5.0))
               {
@@ -112,9 +140,23 @@ http.createServer(function(request, response) {
                  success = true;
               }
            }
+           else if (uri === "/system_state/speed_demand") {
+               address = HOLDING_REGISTER_ADDRESS.speed_demand;
+               value = JSON.parse(body);
+               if ((value) && (value >= 1) && (value <= 55)) {                   
+                   value--;
+                   value /= 30;
+                   value += 1.25;
+                   value *= 1024.0 / 5.0;
+                   value = Math.round(value);
+                   value = Math.max(value, 0);
+                   value = Math.min(value, 1023);
+                   success = true;
+               }
+           }
            else if (uri === "/system_state/speed_actual_filter_COF")
            {
-              address = 6;
+              address = HOLDING_REGISTER_ADDRESS.speed_actual_filter_COF;
               value = JSON.parse(body);
               if ((value) && (value >= 0.0) && (value <= 50.0))
               {
@@ -126,7 +168,55 @@ http.createServer(function(request, response) {
                  success = true;
               }
            }
-              
+           else if (uri === "/system_state/supply_power_filter_COF") {
+               address = HOLDING_REGISTER_ADDRESS.supply_power_filter_COF;
+               value = JSON.parse(body);
+               if ((value) && (value >= 0.0) && (value <= 50.0)) {
+                   value *= -2.0 * Math.PI / 100.0;
+                   value = Math.exp(value) * 32768.0;
+                   value = Math.round(value);
+                   value = Math.max(0, value);
+                   value = Math.min(0x8000, value);
+                   success = true;
+               }
+           }
+           else if (uri === "/system_state/control_active") {
+               address = HOLDING_REGISTER_ADDRESS.control;               
+               is_active = JSON.parse(body);
+               var value = holding_registers[address];
+               value &= ~(CONTROL_ACTIVE_BIT);
+
+               if (typeof is_active === "boolean")
+               {
+                   if (is_active)
+                   {
+                       value |= CONTROL_ACTIVE_BIT;
+                   }                   
+                   success = true;
+               }
+           }
+           else if (uri === "/system_state/control_deadband_volts") {
+               address = HOLDING_REGISTER_ADDRESS.control_deadband;
+               value = JSON.parse(body);
+               if ((value) && (value >= 0.0) && (value <= 5.0)) {
+                   value *= 1024.0 / 5.0;
+                   value = Math.round(value);
+                   value = Math.max(value, 0);
+                   value = Math.min(value, 1023);
+                   success = true;
+               }
+           }
+           else if (uri === "/system_state/control_slowband_volts") {
+               address = HOLDING_REGISTER_ADDRESS.control_slowband;
+               value = JSON.parse(body);
+               if ((value) && (value >= 0.0) && (value <= 5.0)) {
+                   value *= 1024.0 / 5.0;
+                   value = Math.round(value);
+                   value = Math.max(value, 0);
+                   value = Math.min(value, 1023);
+                   success = true;
+               }
+           }
 
            if (success)
            {
