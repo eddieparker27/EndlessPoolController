@@ -22,7 +22,8 @@ var system_state =
    speed_actual_filter_COF : 0.02, //Hz
    supply_power_filter_COF : 0.02, //Hz
    control_deadband_volts : 0.03, //Volts
-   control_slowband_volts : 0.1  
+   control_timeconst : 10000, // Milliseconds
+   radio_tx_interval : 0 // Milliseconds
 };
 
 var holding_registers = [];
@@ -33,13 +34,13 @@ var HOLDING_REGISTER_ADDRESS =
     speed_demand : 2,
     speed_actual : 3,
     control_deadband : 4,
-    control_slowband : 5,
+    control_timeconst : 5,
     speed_actual_filter_COF : 6,
     supply_power : 7,
-    supply_power_filter_COF : 8 
+    supply_power_filter_COF : 8,
+    radio_tx_interval : 9
 }
 
-var START_STOP_BIT = 0x0001;
 var CONTROL_ACTIVE_BIT = 0x0002;
 
 setInterval(service_modbus_queue, 100);
@@ -83,10 +84,12 @@ function read_registers()
          system_state.speed_demand = Math.round((Math.min(Math.max(system_state.speed_demand_volts, 1.25), 3.05) - 1.25) * 30) + 1;
          system_state.speed_actual = Math.round((Math.min(Math.max(system_state.speed_actual_volts, 1.25), 3.05) - 1.25) * 30) + 1;
          system_state.control_deadband_volts = holding_registers[HOLDING_REGISTER_ADDRESS.control_deadband] * 5.0 / 1024;
-         system_state.control_slowband_volts = holding_registers[ HOLDING_REGISTER_ADDRESS.control_slowband ] * 5.0 / 1024;
+         system_state.control_timeconst = holding_registers[HOLDING_REGISTER_ADDRESS.control_timeconst];
          system_state.speed_actual_filter_COF = Math.log(holding_registers[ HOLDING_REGISTER_ADDRESS.speed_actual_filter_COF ] / 32768.0) * 100 / (-2.0 * Math.PI);
-         system_state.supply_power_volts = holding_registers[ HOLDING_REGISTER_ADDRESS.supply_power ] * 5.0 / 1024;
-         system_state.supply_power_filter_COF = Math.log(holding_registers[ HOLDING_REGISTER_ADDRESS.supply_power_filter_COF ] / 32768.0) * 100 / (-2.0 * Math.PI);
+         system_state.supply_power_volts = holding_registers[HOLDING_REGISTER_ADDRESS.supply_power] * 5.0 / 1024;
+         system_state.supply_power_on = (system_state.supply_power_volts > 2.0);
+         system_state.supply_power_filter_COF = Math.log(holding_registers[HOLDING_REGISTER_ADDRESS.supply_power_filter_COF] / 32768.0) * 100 / (-2.0 * Math.PI);
+         system_state.radio_tx_interval = holding_registers[HOLDING_REGISTER_ADDRESS.radio_tx_interval];
 
 
 //console.log(holding_registers);
@@ -206,14 +209,10 @@ http.createServer(function(request, response) {
                    success = true;
                }
            }
-           else if (uri === "/system_state/control_slowband_volts") {
-               address = HOLDING_REGISTER_ADDRESS.control_slowband;
+           else if (uri === "/system_state/control_timeconst") {
+               address = HOLDING_REGISTER_ADDRESS.control_timeconst;
                value = JSON.parse(body);
-               if ((value) && (value >= 0.0) && (value <= 5.0)) {
-                   value *= 1024.0 / 5.0;
-                   value = Math.round(value);
-                   value = Math.max(value, 0);
-                   value = Math.min(value, 1023);
+               if ((value) && (value >= 0.0) && (value <= 0xFFFF)) {
                    success = true;
                }
            }
