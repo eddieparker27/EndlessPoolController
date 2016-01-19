@@ -31,8 +31,10 @@
          var options = 
          {
             title: 'Speeds',
-            curveType: 'function',
-            legend: { position: 'bottom' }
+            //curveType: 'function',
+            legend: { position: 'bottom' },
+            vAxis: { minValue: 1 },
+            vAxis: { maxValue: 55 }
          };
 
          var chart = new google.visualization.LineChart(document.getElementById('curve_chart'));
@@ -44,33 +46,74 @@
 </head>
 <body>
 
-<div id="demo"><h2>Let AJAX change this text</h2></div>
+<div id="system_state">*******</div>
 
-<button type="button" onclick="loadDoc()">Change Content</button>
-
-<button type="button" onclick="incSpeedDemand()">Increment Speed Demand</button>
-
-<form>
-   Actual Speed Filter Cut Off Frequency (Hz):
-   <input id="ascof" type="number" name="asfcof" min="0.0" max="50.0">
-</form>
-
-<button type="button" onclick="setASCOF()">Set Actual Speed COF</button>
-
-</br>
-<input id="ascof_slider" type="range" min="0" max="1" value="0.3" step="0.01" onchange="setASCOF()" />
-<output id="rangevalue"></output>
-
+<button type="button" onclick="updateSystemState()">Update System State</button>
 </br>
 
+<button type="button" onclick="controlActive(true)">Activate Control</button>
+<button type="button" onclick="controlActive(false)">Deactivate Control</button>
+
+</br>
+<div>Speed Actual Cutoff Filter Frequency (Hz)</div>
+<input id="ascof_slider" type="range" min="0" max="1" value="0.3" step="0.01" onchange="setASCOF(ascof_slider.value)" />
+<output id="ascof_slider_value"></output>
+
+</br>
+<div>Speed Demand (Volts)</div>
+<input id="sdv_slider" type="range" min="0" max="5" value="0.0" step="0.05" onchange="setSpeedDemandVolts(sdv_slider.value)" />
+<output id="sdv_slider_value"></output>
+
+</br>
+<div>Speed Demand (Register)</div>
+<input id="sdr_slider" type="range" min="0" max="1023" value="0" step="1" onchange="setSpeedDemandRegister(sdr_slider.value)" />
+<output id="sdr_slider_value"></output>
+<button type="button" onclick="setSpeedDemandRegister(sdr_slider_value.value-1+2)">Inc</button>
+<button type="button" onclick="setSpeedDemandRegister(sdr_slider_value.value-1)">Dec</button>
+
+</br>
+<div>Speed Demand</div>
+<input id="speed_demand_slider" type="range" min="1" max="55" value="1" step="1" onchange="setSpeedDemand(speed_demand_slider.value)" />
+<output id="speed_demand_slider_value"></output>
+<button type="button" onclick="setSpeedDemand(speed_demand_slider_value.value-1+2)">Inc</button>
+<button type="button" onclick="setSpeedDemand(speed_demand_slider_value.value-1)">Dec</button>
+
+
+</br>
+<div>Control Deadband (Volts)</div>
+<input id="cdbv_slider" type="range" min="0" max="0.1" value="0.0" step="0.01" onchange="setControlDeadbandVolts(cdbv_slider.value)" />
+<output id="cdbv_slider_value"></output>
+
+</br>
+<div>Control Timeconst (ms)</div>
+<input id="ctc_slider" type="range" min="0" max="65535" value="10000" step="1" onchange="setControlTimeconst(ctc_slider.value)" />
+<output id="ctc_slider_value"></output>
+
+</br>
 <div id="curve_chart" style="width: 900px; height: 500px"></div>
 
 <script>
 
-function setASCOF()
+function controlActive(is_active)
 {
-   var val = document.getElementById("ascof_slider").value;
-   document.getElementById("rangevalue").value = val;
+    var xhttp = new XMLHttpRequest();
+
+    xhttp.onreadystatechange = function () {
+        if (xhttp.readystate == 4 && xhttp.status == 200) {
+        }
+    };
+
+    xhttp.open("PUT", "/system_state/control_active", true);
+    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+    var put_data = JSON.stringify(is_active);
+    xhttp.setRequestHeader("Content-Length", put_data.length);
+    xhttp.send(put_data);
+
+}
+
+function setASCOF(value)
+{
+   document.getElementById("ascof_slider_value").value = value;
    var xhttp = new XMLHttpRequest();
  
    xhttp.onreadystatechange = function() {
@@ -81,9 +124,41 @@ function setASCOF()
 
    xhttp.open("PUT", "/system_state/speed_actual_filter_COF", true);
    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-   var put_data = JSON.stringify(val);
+   var put_data = JSON.stringify(value);
    xhttp.setRequestHeader("Content-Length", put_data.length);
    xhttp.send(put_data);
+}
+
+function setControlDeadbandVolts(value) {
+    document.getElementById("cdbv_slider_value").value = value;
+    var xhttp = new XMLHttpRequest();
+
+    xhttp.onreadystatechange = function () {
+        if (xhttp.readystate == 4 && xhttp.status == 200) {
+        }
+    };
+
+    xhttp.open("PUT", "/system_state/control_deadband_volts", true);
+    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+    var put_data = JSON.stringify(value);
+    xhttp.setRequestHeader("Content-Length", put_data.length);
+    xhttp.send(put_data);
+}
+
+function setControlTimeconst(value) {
+    document.getElementById("ctc_slider_value").value = value;
+    var xhttp = new XMLHttpRequest();
+
+    xhttp.onreadystatechange = function () {
+        if (xhttp.readystate == 4 && xhttp.status == 200) {
+        }
+    };
+
+    xhttp.open("PUT", "/system_state/control_timeconst", true);
+    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+    var put_data = JSON.stringify(value);
+    xhttp.setRequestHeader("Content-Length", put_data.length);
+    xhttp.send(put_data);
 }
 
 var system_state = 
@@ -91,14 +166,17 @@ var system_state =
    control_active : false,
    supply_power_on : false,
    speed_demand : 0,
-   speed_actual : 0,
+   speed_actual: 0,
+   speed_demand_register : 0,
+   speed_actual_register : 0,
    speed_actual_volts : 0,
    speed_demand_volts : 0,
    supply_power_volts : 0,
    speed_actual_filter_COF : 0,
    supply_power_filter_COF : 0,
    control_deadband_volts : 0,
-   control_slowband_volts : 0
+   control_timeconst : 0,
+   radio_tx_interval : 0
 };
 
 var list_head = null;
@@ -106,14 +184,21 @@ var list_tail = null;
 var list_length = 0;
 var list_length_max = 100;
 
-setInterval(loadDoc, 1000);
+setInterval(updateSystemState, 1000);
 
-function loadDoc() {
+function updateSystemState() {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
     if (xhttp.readyState == 4 && xhttp.status == 200) {
-      document.getElementById("demo").innerHTML = xhttp.responseText;
-      system_state = JSON.parse( xhttp.responseText );
+      document.getElementById("system_state").innerHTML = xhttp.responseText;
+      system_state = JSON.parse(xhttp.responseText);
+
+      document.getElementById("ascof_slider_value").value = system_state.speed_actual_filter_COF;
+      document.getElementById("sdv_slider_value").value = system_state.speed_demand_volts;
+      document.getElementById("sdr_slider_value").value = system_state.speed_demand_register;
+      document.getElementById("speed_demand_slider_value").value = system_state.speed_demand;
+      document.getElementById("cdbv_slider_value").value = system_state.control_deadband_volts;
+      document.getElementById("ctc_slider_value").value = system_state.control_timeconst;
 
 //console.log(xhttp.responseText);
 //console.log(system_state);
@@ -123,8 +208,8 @@ function loadDoc() {
 
       var list_ele = {
          date : d.getTime(),
-         demand : system_state.speed_demand_volts,
-         actual : system_state.speed_actual_volts,
+         demand : system_state.speed_demand,
+         actual : system_state.speed_actual,
          prev : list_tail,
          next : null};
 
@@ -153,7 +238,7 @@ function loadDoc() {
   xhttp.send();
 }
 
-function incSpeedDemand() 
+function setSpeedDemandVolts(value) 
 {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
@@ -164,10 +249,37 @@ function incSpeedDemand()
   };
   xhttp.open("PUT", "/system_state/speed_demand_volts", true);
   xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-  system_state.speed_demand_volts += 0.1;
-  var put_data = JSON.stringify(system_state.speed_demand_volts);
+  var put_data = JSON.stringify(value);
   xhttp.setRequestHeader("Content-Length", put_data.length);
   xhttp.send(put_data);
+}
+
+function setSpeedDemandRegister(value) {
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function () {
+        if (xhttp.readyState == 4 && xhttp.status == 200) {
+
+        }
+    };
+    xhttp.open("PUT", "/system_state/speed_demand_register", true);
+    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+    var put_data = JSON.stringify(value);
+    xhttp.setRequestHeader("Content-Length", put_data.length);
+    xhttp.send(put_data);
+}
+
+function setSpeedDemand(value) {
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function () {
+        if (xhttp.readyState == 4 && xhttp.status == 200) {
+
+        }
+    };
+    xhttp.open("PUT", "/system_state/speed_demand", true);
+    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+    var put_data = JSON.stringify(value);
+    xhttp.setRequestHeader("Content-Length", put_data.length);
+    xhttp.send(put_data);
 }
 </script>
 
