@@ -60,8 +60,10 @@ static const unsigned char _auchCRCLo[] =
    0x40
  };
 
-#define BUF_LEN     (4096)
-static unsigned char buf[ BUF_LEN ];
+#define BUF_LEN     (1024)
+static unsigned char tcp_buf[ BUF_LEN ];
+static unsigned char ser_req_buf[ BUF_LEN ];
+static unsigned char ser_rsp_buf[ BUF_LEN ];
 
 #define MBAP_HEADER_LEN     (7)
 
@@ -70,8 +72,7 @@ static unsigned char buf[ BUF_LEN ];
 #define DEFAULT_BAUD_RATE   (115200)
 #define INTER_CHAR_DELAY    (2000) // micro seconds
 #define RESPONSE_TIMEOUT    (1000000) // micro seconds
-
-static int msg_len;
+#define SERIAL_RETRIES      (5)
 
 unsigned short
 calc_crc(unsigned char address, unsigned char* pduFrame, unsigned char pduLen) 
@@ -123,11 +124,13 @@ main(int argc, char *argv[])
    socklen_t clilen;
    struct sockaddr_in serv_addr, cli_addr;
    bool result;
-   unsigned char mbap_unit_id;
+   int serial_retries;
    int enable = 1;
    unsigned char slave_id = DEFAULT_SLAVE_ID;
    unsigned short port_num = DEFAULT_PORT_NUM;
    int baud_rate = DEFAULT_BAUD_RATE;
+   int msg_len;
+   int ser_req_len;
 
    opterr = 0;
    while ((c = getopt (argc, argv, "s:p:b:")) != -1)
@@ -226,21 +229,33 @@ main(int argc, char *argv[])
 
          cfsetospeed(&tty, baud_rate);
          cfsetispeed(&tty, baud_rate);
- 
-         tty.c_cflag     &=  ~PARENB;
-         tty.c_cflag     &=  ~CSTOPB;
-         tty.c_cflag     &=  ~CSIZE;
-         tty.c_cflag     |=  CS8;
-         tty.c_cflag     &=  ~CRTSCTS;
+
+         /* Flags */
+         tty.c_cflag     &=  ~PARENB;    /* No Partity */
+         tty.c_cflag     &=  ~CSTOPB;    /* One Stop Bit only */
+         tty.c_cflag     &=  ~CSIZE;     /* Zero out the mask for the number of bits per char */
+         tty.c_cflag     |=  CS8;        /* Set the number of bits to 8 */
+         tty.c_cflag     &=  ~CRTSCTS;   
+         tty.c_cflag     |= CREAD;      /* Allow input */
+         tty.c_cflag     |= CLOCAL;     /* Disable modem status lines */
+
          tty.c_lflag     =  0;
          tty.c_oflag     =  0;
          tty.c_cc[VMIN]  =  0;
          tty.c_cc[VTIME] =  0;
 
-         tty.c_cflag     |=  CREAD | CLOCAL;
-         tty.c_iflag     &=  ~(IXON | IXOFF | IXANY);
-         tty.c_lflag     &=  ~(ICANON | ECHO | ECHOE | ISIG);
-         tty.c_oflag     &=  ~OPOST;
+         tty.c_iflag     &= ~(ISTRIP);/* Don't strip 8th bit */
+         tty.c_iflag     &= ~(IGNCR); /* Don't ignore CR '\r' */
+         tty.c_iflag     &= ~(ICRNL); /* Don't change CR '\r' to NL '\n' */
+         tty.c_iflag     &= ~(INLCR); /* Don't change NL '\n' to CR '\r' */
+         tty.c_iflag     &= ~(IXON | IXOFF | IXANY); /* No flow control */
+
+         tty.c_lflag     &=  ~(ICANON); /* Non canonical */
+         tty.c_lflag     &=  ~(ECHO); /* No Echo */
+         tty.c_lflag     &=  ~(ECHOE);/* No echo erase */
+         tty.c_lflag     &=  ~(ISIG); /* Ignore INTR, QUIT and SUSP chars */
+         tty.c_oflag     &=  ~(OPOST);/*No post processing on output bytes */
+         tty.c_oflag     &=  ~(ONLCR);/*Don't translate NL '\n' into CR NL */
 
          tcflush(USB, TCIFLUSH);
 
@@ -267,125 +282,119 @@ main(int argc, char *argv[])
          do
          {
             printf("Waiting for incoming request\n");
-            result = read_bytes(newsockfd, buf, (MBAP_HEADER_LEN - 1));
+            result = read_bytes(newsockfd, tcp_buf, (MBAP_HEADER_LEN - 1));
             if (result)
             {
-               msg_len = (buf[ 4 ] << 8) | (buf[ 5 ]);
-               result = read_bytes(newsockfd, buf, msg_len);
-               if (result)
+               msg_len = (tcp_buf[ 4 ] << 8) | (tcp_buf[ 5 ]);
+               result = read_bytes(newsockfd, 
+                                   tcp_buf + (MBAP_HEADER_LEN - 1), 
+                                   msg_len);
+            }
+            if (result)
+            {
+               ser_req_buf[ 0 ] = slave_id;
+               memcpy(ser_req_buf + 1, tcp_buf + MBAP_HEADER_LEN, msg_len - 1);
+               crc = calc_crc(slave_id, ser_req_buf + 1, msg_len - 1);
+               ser_req_buf[ msg_len++ ] = (crc >> 8);
+               ser_req_buf[ msg_len++ ] = (crc & 0xFF);
+               ser_req_len = msg_len;
+               printf("SER REQ :: ");
+               for (i = 0; i < ser_req_len; i++)
                {
-				  bool testing_crc_problem = FALSE;
-				  do
-				  {
-					  mbap_unit_id = buf[0];
-					  buf[0] = slave_id;
-					  crc = calc_crc(slave_id, buf + 1, msg_len - 1);
-					  buf[msg_len++] = (crc >> 8);
-					  buf[msg_len++] = (crc & 0xFF);
-
-					  printf("SER REQ :: ");
-					  for (i = 0; i < msg_len; i++)
-					  {
-						  printf("[%02x]", buf[i]);
-					  }
-					  printf("\n");
-
-					  res = write(USB, buf, msg_len);
-					  if (res != msg_len)
-					  {
-						  result = FALSE;
-						  printf("Failed to write message to serial port!\n");
-					  }
-					  else
-					  {
-						  res = 0;
-						  /*
-						  * Wait for first char
-						  */
-						  int counter = RESPONSE_TIMEOUT / INTER_CHAR_DELAY;
-						  i = 0;
-						  while ((counter--) && (i == 0))
-						  {
-							  i = read(USB, buf + (MBAP_HEADER_LEN - 1), BUF_LEN);
-							  usleep(INTER_CHAR_DELAY);
-						  }
-						  if (i < 0)
-						  {
-							  i = 0;
-						  }
-						  /*
-						  * Get rest of message
-						  */
-						  while (i != 0)
-						  {
-							  res += i;
-							  i = read(USB,
-								  buf + res + (MBAP_HEADER_LEN - 1),
-								  BUF_LEN - res - (MBAP_HEADER_LEN - 1));
-							  if (i < 0)
-							  {
-								  i = 0;
-								  res = 0;
-							  }
-							  usleep(INTER_CHAR_DELAY);
-						  }
-						  msg_len = 0;
-						  printf("Read %d chars\n", res);
-						  if (res > 0)
-						  {
-							  msg_len = res;
-
-							  printf("SER RSP :: ");
-							  for (i = MBAP_HEADER_LEN - 1; i < (msg_len + MBAP_HEADER_LEN - 1); i++)
-							  {
-								  printf("[%02x]", buf[i]);
-							  }
-							  printf("\n");
-
-							  crc = calc_crc(buf[MBAP_HEADER_LEN - 1],
-								  buf + MBAP_HEADER_LEN,
-								  msg_len - 1);
-							  if (crc != 0)
-							  {
-								  printf("CRC mismatch!!!\n");
-								  testing_crc_problem = TRUE;
-								  result = FALSE;
-							  }
-							  else
-							  {
-								  buf[MBAP_HEADER_LEN - 1] = mbap_unit_id;
-								  msg_len -= 2; /* Knock off crc */
-								  bzero(buf, (MBAP_HEADER_LEN - 1));
-								  buf[1] = 1;
-								  buf[4] = (msg_len >> 8);
-								  buf[5] = msg_len & 0xFF;
-								  msg_len += (MBAP_HEADER_LEN - 1); /* Add on MBAP */
-
-								  printf("TCP RSP :: ");
-								  for (i = 0; i < msg_len; i++)
-								  {
-									  printf("[%02x]", buf[i]);
-								  }
-								  printf("\n");
-
-								  res = write(newsockfd, buf, msg_len);
-								  if (res != msg_len)
-								  {
-									  result = FALSE;
-								  }
-								  else
-								  {
-									  result = TRUE;									  
-								  }
-							  }
-						  }
-						  else
-						  {
-							  result = FALSE;
-						  }
-					  }
-				  } while (testing_crc_problem);
-			   }
+                  printf("[%02x]", ser_req_buf[ i ]);
+               }
+               printf("\n");
+            }
+            
+            serial_retries = SERIAL_RETRIES;
+            while ((result) && (serial_retries--))
+            {
+               res = write(USB, ser_req_buf, ser_req_len);
+               if (res != ser_req_len)
+               {
+                  result = FALSE;
+                  printf("Failed to write message to serial port!\n");
+               }
+               else
+               {
+                  res = 0;
+                  /*
+                   * Wait for first char
+                   */
+                  int counter = RESPONSE_TIMEOUT / INTER_CHAR_DELAY;
+                  i = 0;
+                  while ((counter--) && (i == 0))
+                  {
+                     i = read(USB, 
+                              ser_rsp_buf, 
+                              BUF_LEN);
+                     usleep(INTER_CHAR_DELAY);
+                  }
+                  if (i < 0)
+                  {
+                     i = 0;
+                  }
+                  /*
+                   * Get rest of message
+                   */
+                  while (i != 0)
+                  {
+                     res += i;
+                     i = read(USB,
+                              ser_rsp_buf + res,
+                              BUF_LEN - res);
+                     if (i < 0)
+                     {
+                        i = 0;
+                        res = 0;
+                     }
+                     usleep(INTER_CHAR_DELAY);
+                  }
+                  msg_len = 0;
+                  printf("Read %d chars\n", res);
+                  if (res > 0)
+                  {
+                     msg_len = res;
+                     printf("SER RSP :: ");
+                     for (i = 0; i < msg_len; i++)
+                     {
+                        printf("[%02x]", ser_rsp_buf[i]);
+                     }
+                     printf("\n");
+                     crc = calc_crc(ser_rsp_buf[ 0 ],
+                                    ser_rsp_buf + 1,
+                                    msg_len - 1);
+                     if (crc != 0)
+                     {
+                        printf("CRC mismatch!!!\n");
+                        result = (serial_retries > 0);
+                     }
+                     else
+                     {     
+                        serial_retries = 0;                  
+                        memcpy(tcp_buf + MBAP_HEADER_LEN, ser_rsp_buf + 1, msg_len - 3);
+                        msg_len -= 2; /* Remove CRC */
+                        tcp_buf[ 4 ] = (msg_len >> 8);
+                        tcp_buf[ 5 ] = msg_len & 0xFF;
+                        msg_len += (MBAP_HEADER_LEN - 1); /* Add on MBAP */
+                        printf("TCP RSP :: ");
+                        for (i = 0; i < msg_len; i++)
+                        {
+                           printf("[%02x]", tcp_buf[i]);
+                        }
+                        printf("\n");
+                        res = write(newsockfd, tcp_buf, msg_len);
+                        if (res != msg_len)
+                        {
+                           result = FALSE;
+                        }
+                     }
+                  }
+                  else
+                  {
+                     result = FALSE;
+                  }
+               }                                 
             }
          } while(result);
          
