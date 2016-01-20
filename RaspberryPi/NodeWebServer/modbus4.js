@@ -52,6 +52,7 @@ function service_modbus_queue()
 {
    if ((!modbus_busy) && (modbus_queue_len > 0))
    {
+      modbus_busy = true;
       modbus_queue[ modbus_queue_len - 1 ]();
       modbus_queue_len--;
    }
