@@ -2,7 +2,7 @@
 <html>
 <head>
    <style>
-      body 
+      body
       {
          background-image: url("water.png");
          background-repeat: repeat;
@@ -11,24 +11,31 @@
 
    <script type="text/javascript" src="loader.js"></script>
    <script type="text/javascript">
+      var chart = null;
+
       google.charts.load('current', {'packages':['corechart']});
       google.charts.setOnLoadCallback(drawChart);
 
-      function drawChart() 
+      function drawChart()
       {
-         var tdata = new google.visualization.DataTable(); 
+         if (chart)
+         {
+            chart.clearChart();
+         }
+
+         var tdata = new google.visualization.DataTable();
          tdata.addColumn('datetime', 'Time');
          tdata.addColumn('number', 'Demand');
          tdata.addColumn('number', 'Actual');
-         
-         var list_ele = list_head;         
+
+         var list_ele = list_head;
          while(list_ele)
          {
             tdata.addRow([new Date(list_ele.date), Number(list_ele.demand), Number(list_ele.actual)]);
             list_ele = list_ele.next;
          }
 
-         var options = 
+         var options =
          {
             title: 'Speeds',
             //curveType: 'function',
@@ -37,9 +44,9 @@
             vAxis: { maxValue: 55 }
          };
 
-         var chart = new google.visualization.LineChart(document.getElementById('curve_chart'));
-
+         chart = new google.visualization.LineChart(document.getElementById('curve_chart'));
          chart.draw(tdata, options);
+
       }
    </script>
 
@@ -106,7 +113,6 @@ function controlActive(is_active)
     xhttp.open("PUT", "/system_state/control_active", true);
     xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
     var put_data = JSON.stringify(is_active);
-    xhttp.setRequestHeader("Content-Length", put_data.length);
     xhttp.send(put_data);
 
 }
@@ -115,7 +121,7 @@ function setASCOF(value)
 {
    document.getElementById("ascof_slider_value").value = value;
    var xhttp = new XMLHttpRequest();
- 
+
    xhttp.onreadystatechange = function() {
      if (xhttp.readystate == 4 && xhttp.status == 200)
      {
@@ -125,7 +131,6 @@ function setASCOF(value)
    xhttp.open("PUT", "/system_state/speed_actual_filter_COF", true);
    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
    var put_data = JSON.stringify(value);
-   xhttp.setRequestHeader("Content-Length", put_data.length);
    xhttp.send(put_data);
 }
 
@@ -141,7 +146,6 @@ function setControlDeadbandVolts(value) {
     xhttp.open("PUT", "/system_state/control_deadband_volts", true);
     xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
     var put_data = JSON.stringify(value);
-    xhttp.setRequestHeader("Content-Length", put_data.length);
     xhttp.send(put_data);
 }
 
@@ -157,11 +161,10 @@ function setControlTimeconst(value) {
     xhttp.open("PUT", "/system_state/control_timeconst", true);
     xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
     var put_data = JSON.stringify(value);
-    xhttp.setRequestHeader("Content-Length", put_data.length);
     xhttp.send(put_data);
 }
 
-var system_state = 
+var system_state =
 {
    control_active : false,
    supply_power_on : false,
@@ -202,7 +205,7 @@ function updateSystemState() {
 
 //console.log(xhttp.responseText);
 //console.log(system_state);
-      
+
       list_length++;
       var d = new Date();
 
@@ -238,19 +241,18 @@ function updateSystemState() {
   xhttp.send();
 }
 
-function setSpeedDemandVolts(value) 
+function setSpeedDemandVolts(value)
 {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
-    if (xhttp.readyState == 4 && xhttp.status == 200) 
+    if (xhttp.readyState == 4 && xhttp.status == 200)
     {
-      
+
     }
   };
   xhttp.open("PUT", "/system_state/speed_demand_volts", true);
   xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
   var put_data = JSON.stringify(value);
-  xhttp.setRequestHeader("Content-Length", put_data.length);
   xhttp.send(put_data);
 }
 
@@ -264,7 +266,6 @@ function setSpeedDemandRegister(value) {
     xhttp.open("PUT", "/system_state/speed_demand_register", true);
     xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
     var put_data = JSON.stringify(value);
-    xhttp.setRequestHeader("Content-Length", put_data.length);
     xhttp.send(put_data);
 }
 
@@ -278,7 +279,6 @@ function setSpeedDemand(value) {
     xhttp.open("PUT", "/system_state/speed_demand", true);
     xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
     var put_data = JSON.stringify(value);
-    xhttp.setRequestHeader("Content-Length", put_data.length);
     xhttp.send(put_data);
 }
 </script>
