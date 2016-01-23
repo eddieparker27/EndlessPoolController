@@ -16,15 +16,38 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <semaphore.h>
+#include <time.h>
 
+typedef unsigned short word;
+typedef unsigned long ULONG;
 typedef int bool;
 #define FALSE (1==0)
 #define TRUE (1==1)
+#define CONTROL_ACTIVE_BIT (0x0002)
+
+ULONG
+get_ms(void)
+{
+   ULONG ms;
+   struct timespec tp;
+   clock_gettime(CLOCK_REALTIME, &tp);
+
+   ms = tp.tv_sec * 1000;
+   ms += tp.tv_nsec / 1000000;
+
+   return ms;
+}
+
+
 
 #define BUF_LEN     (1024)
 static unsigned char tcp_buf[ BUF_LEN ];
 static unsigned char ser_req_buf[ BUF_LEN ];
 static unsigned char ser_rsp_buf[ BUF_LEN ];
+
+#define max(a,b)     ((a) > (b) ? (a) : (b))
+
+#define MIN_DELAY_BETWEEN_MESSAGES       (100)
 
 #define MBAP_HEADER_LEN     (7)
 
@@ -65,11 +88,22 @@ main(int argc, char *argv[])
    int msg_len;
    int ser_req_len;
    unsigned short MB_regs[ 100 ];
+   word speed_demand = 0;
+   word speed_actual = 0;
+   word measured_speed_actual = 0;
+   word filtered_measured_speed_actual = 0;
+   word control_deadband = 0;
+   word control_timeconst = 0;
+   word radioTX_interval = 0;
    
    for(i = 0; i < 100; i++)
    {
        MB_regs[ i ] = 0;
    }
+   
+   /* Intializes random number generator */
+   time_t t;
+   srand((unsigned) time(&t));
 
    opterr = 0;
    while ((c = getopt (argc, argv, "p:")) != -1)
@@ -112,6 +146,15 @@ main(int argc, char *argv[])
       return(1);
    }
    listen(sockfd, 5);
+   
+   ULONG time;
+   ULONG elapsed;
+   ULONG last_time;
+
+   if (last_time == 0)
+   {
+      last_time = get_ms();  
+   }
 
    while(TRUE)
    {
@@ -147,6 +190,50 @@ main(int argc, char *argv[])
                printf("[%02x]", ser_req_buf[ i ]);
             }
             printf("\n");
+            
+            time = get_ms();
+            elapsed = time - last_time;
+            last_time = time;
+            
+            MB_regs[ 1 ] = MB_regs[ 0 ];
+            speed_demand = MB_regs[ 2 ];
+            control_deadband = MB_regs[ 4 ];
+            control_timeconst = MB_regs[ 5 ];
+            
+            
+            word control_error = abs(speed_actual - speed_demand);
+            if (control_error > control_deadband)
+            {
+               radioTX_interval = control_timeconst / (control_error * control_error);
+               radioTX_interval = max(radioTX_interval, MIN_DELAY_BETWEEN_MESSAGES);
+            }
+            else
+            {
+               // Set the interval to max
+               radioTX_interval = 0xFFFF;
+            }
+            
+            if (MB_regs[ 1 ] & CONTROL_ACTIVE_BIT)
+            {
+                if (speed_demand > speed_actual)
+                {
+                    int num = (6 * (rand() % 100) * elapsed); 
+                    int denom = (radioTX_interval * 100);
+                    printf("UP %d %d\n", num, denom);
+                    speed_actual += num / denom;
+                }
+                else if (speed_demand < speed_actual)
+                {
+                    int num = (6 * (rand() % 100) * elapsed); 
+                    int denom = (radioTX_interval * 100);
+                    printf("DOWN %d %d\n", num, denom);
+                    speed_actual -= num / denom;
+                }                
+            }
+            
+            MB_regs[ 3 ] = speed_actual;
+            MB_regs[ 9 ] = radioTX_interval;
+            
          
             /* Start with an echo response */
             memcpy(ser_rsp_buf, ser_req_buf, ser_req_len);

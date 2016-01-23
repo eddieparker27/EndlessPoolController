@@ -1,0 +1,1 @@
+{"name":"test0001","description":"A test that ramps up and back down","sections":[{"speed":10,"duration":20},{"speed":20,"duration":10},{"speed":30,"duration":10},{"speed":40,"duration":5},{"speed":30,"duration":10},{"speed":20,"duration":10},{"speed":10,"duration":20}]}

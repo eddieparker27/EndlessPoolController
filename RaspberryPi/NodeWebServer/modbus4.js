@@ -7,8 +7,7 @@ var http = require("http"),
     fs = require("fs"),
     port = process.argv[2] || 80;
 
-
-var system_state = 
+var system_state =
 {
    control_active : false,
    supply_power_on : false,
@@ -27,7 +26,7 @@ var system_state =
 };
 
 var holding_registers = [];
-var HOLDING_REGISTER_ADDRESS = 
+var HOLDING_REGISTER_ADDRESS =
 {
     control : 0,
     response : 1,
@@ -64,15 +63,83 @@ function write_modbus_queue(req_function)
    modbus_queue_len++;
 }
 
-/*
-* Initialise Variables 
-*/
-setValue("speed_actual_filter_COF", system_state.speed_actual_filter_COF);
-setValue("supply_power_filter_COF", system_state.supply_power_filter_COF);
-setValue("control_deadband_volts", system_state.control_deadband_volts);
-setValue("control_timeconst", system_state.control_timeconst);
+var workout = {
+   name : "test0001",
+   description : "A test that ramps up and back down",
+   sections : [
+      {speed : 10, duration : 20},
+      {speed : 20, duration : 10},
+      {speed : 30, duration : 10},
+      {speed : 40, duration : 5},
+      {speed : 30, duration : 10},
+      {speed : 20, duration : 10},
+      {speed : 10, duration : 20}
+   ]
+}
 
+var workouts = [];
+var num_workouts = 0;
 
+function initialiseSystem()
+{
+   /*
+   * Read in any workouts
+   */
+   files = fs.readdirSync("workouts");
+   var len = files.length;
+   for(var i = 0; i < len; i++)
+   {
+      var pathname = "workouts/" + files[ i ];
+      console.log(pathname);
+      filedata = fs.readFileSync(pathname);
+      var wo = JSON.parse(filedata);
+      var parse_ok = false;
+      if ((typeof(wo.name) !== 'undefined') &&
+          (typeof(wo.description) !== 'undefined') &&
+          (typeof(wo.sections) !== 'undefined'))
+      {
+         console.log("name, description and sections exist")
+         parse_ok = true;
+         var sec_len = wo.sections.length;
+         for(var j = 0; j < sec_len; j++)
+         {
+            console.log("Checking section " + j);
+            console.log(JSON.stringify(wo.sections[j]));
+            if ((typeof(wo.sections[ j ].speed) === 'undefined') ||
+                (typeof(wo.sections[ j ].duration) === 'undefined'))
+            {
+               parse_ok = false;
+               break;
+            }
+         }
+         if (parse_ok)
+         {
+            console.log("File parsed okay. Adding");
+            workouts[ num_workouts++ ] = wo;
+         }
+      }
+   }
+
+   console.log(JSON.stringify(workouts));
+
+   fs.writeFile("workouts/00001.wo", JSON.stringify(workout), function(err)
+      {
+         if(err)
+         {
+            return console.log(err);
+         }
+         console.log("The file was saved!");
+      });
+   /*
+   * Initialise control parameters
+   */
+   setValue("speed_actual_filter_COF", system_state.speed_actual_filter_COF);
+   setValue("supply_power_filter_COF", system_state.supply_power_filter_COF);
+   setValue("control_deadband_volts", system_state.control_deadband_volts);
+   setValue("control_timeconst", system_state.control_timeconst);
+}
+
+initialiseSystem();
 setInterval(read_registers, 1000);
 
 function read_registers()
@@ -112,7 +179,7 @@ function setValue(name, value)
 {
     var success = false;
     var address = 0;
-    
+
     if (name === "speed_demand_register")
     {
         address = HOLDING_REGISTER_ADDRESS.speed_demand;
@@ -241,14 +308,14 @@ http.createServer(function(request, response) {
   if (request.method === "PUT")
   {
      var body = "";
-     request.on('data', function(chunk) 
+     request.on('data', function(chunk)
         {
            //console.log("Received body data:");
            //console.log(chunk.toString());
            body += chunk.toString();
         });
-    
-     request.on('end', function() 
+
+     request.on('end', function()
         {
            if ((uri === "/system_state/speed_demand_register") ||
                (uri === "/system_state/speed_demand_volts") ||
@@ -288,9 +355,10 @@ http.createServer(function(request, response) {
         return;
      }
 
-     fs.exists(filename, function(exists) 
+
+     fs.exists(filename, function(exists)
         {
-           if(!exists) 
+           if(!exists)
            {
               response.writeHead(404, {"Content-Type": "text/plain"});
               response.write("404 Not Found\n");
@@ -300,10 +368,10 @@ http.createServer(function(request, response) {
 
            if (fs.statSync(filename).isDirectory()) filename += '/index.html';
 
-           fs.readFile(filename, "binary", function(err, file) 
+           fs.readFile(filename, "binary", function(err, file)
               {
-                 if(err) 
-                 {        
+                 if(err)
+                 {
                     response.writeHead(500, {"Content-Type": "text/plain"});
                     response.write(err + "\n");
                     response.end();
@@ -319,4 +387,3 @@ http.createServer(function(request, response) {
 }).listen(parseInt(port, 10));
 
 console.log("Static file server running at\n  => http://localhost:" + port + "/\nCTRL + C to shutdown");
-
