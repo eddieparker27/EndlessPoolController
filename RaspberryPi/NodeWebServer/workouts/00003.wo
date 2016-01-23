@@ -1,0 +1,19 @@
+{
+   "name":"Intervals 5 x (2 + 2)",
+   "description":"A session of 22 minutes. 5 reps of 2 mins high / 2 mins low intervals with 1 min warmup/down",
+   "sections":
+   [
+      {"speed":10,"duration":60},
+      {"speed":25,"duration":120},
+      {"speed":35,"duration":120},
+      {"speed":25,"duration":120},
+      {"speed":35,"duration":120},
+      {"speed":25,"duration":120},
+      {"speed":35,"duration":120},
+      {"speed":25,"duration":120},
+      {"speed":35,"duration":120},
+      {"speed":25,"duration":120},
+      {"speed":35,"duration":120},
+      {"speed":10,"duration":60}
+   ]
+}

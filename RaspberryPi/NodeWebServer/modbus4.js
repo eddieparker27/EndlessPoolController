@@ -18,8 +18,8 @@ var system_state =
    speed_actual_register : 0,
    speed_demand_register : 0,
    supply_power_volts : 0,
-   speed_actual_filter_COF : 0.02, //Hz
-   supply_power_filter_COF : 0.02, //Hz
+   speed_actual_filter_COF : 0.25, //Hz
+   supply_power_filter_COF : 0.25, //Hz
    control_deadband_volts : 0.03, //Volts
    control_timeconst : 10000, // Milliseconds
    radio_tx_interval : 0 // Milliseconds
@@ -63,22 +63,10 @@ function write_modbus_queue(req_function)
    modbus_queue_len++;
 }
 
-var workout = {
-   name : "test0001",
-   description : "A test that ramps up and back down",
-   sections : [
-      {speed : 10, duration : 20},
-      {speed : 20, duration : 10},
-      {speed : 30, duration : 10},
-      {speed : 40, duration : 5},
-      {speed : 30, duration : 10},
-      {speed : 20, duration : 10},
-      {speed : 10, duration : 20}
-   ]
-}
-
 var workouts = [];
 var num_workouts = 0;
+var active_workout = null;
+var active_workout_index = -1;
 
 function initialiseSystem()
 {
@@ -90,7 +78,7 @@ function initialiseSystem()
    for(var i = 0; i < len; i++)
    {
       var pathname = "workouts/" + files[ i ];
-      console.log(pathname);
+      console.log("Reading " + pathname);
       filedata = fs.readFileSync(pathname);
       var wo = JSON.parse(filedata);
       var parse_ok = false;
@@ -108,6 +96,7 @@ function initialiseSystem()
             if ((typeof(wo.sections[ j ].speed) === 'undefined') ||
                 (typeof(wo.sections[ j ].duration) === 'undefined'))
             {
+               console.log("Section " + j + " failed parsing");
                parse_ok = false;
                break;
             }
@@ -120,16 +109,6 @@ function initialiseSystem()
       }
    }
 
-   console.log(JSON.stringify(workouts));
-
-   fs.writeFile("workouts/00001.wo", JSON.stringify(workout), function(err)
-      {
-         if(err)
-         {
-            return console.log(err);
-         }
-         console.log("The file was saved!");
-      });
    /*
    * Initialise control parameters
    */
@@ -142,13 +121,31 @@ function initialiseSystem()
 initialiseSystem();
 setInterval(read_registers, 1000);
 
+function set_active_workout_index(index)
+{
+   if ((index >= 0) && (index < num_workouts))
+   {
+      console.log("Active workout index = " + index);
+      active_workout_index = index;
+      active_workout = workouts[ active_workout_index ];
+      active_workout.mode = 'OFF';
+      active_workout.runtime = 0;
+      var len = active_workout.sections.length;
+      active_workout.cumtime = 0;
+      for(var i = 0; i < len; i++)
+      {
+         active_workout.sections[ i ].cumtime = active_workout.cumtime;
+         active_workout.cumtime += active_workout.sections[ i ].duration;
+      }
+   }
+}
+
 function read_registers()
 {
    write_modbus_queue(function() {
       client.request(FC.READ_HOLDING_REGISTERS, 0, 10, function(err, response) {
          modbus_busy = false;
          if (err) throw err;
-         //console.log(response);
          for(k = 0; k < 10; k++)
          {
             holding_registers[ k ] = response[ k ];
@@ -168,8 +165,28 @@ function read_registers()
          system_state.supply_power_filter_COF = Math.log(holding_registers[HOLDING_REGISTER_ADDRESS.supply_power_filter_COF] / 32768.0) * 100 / (-2.0 * Math.PI);
          system_state.radio_tx_interval = holding_registers[HOLDING_REGISTER_ADDRESS.radio_tx_interval];
 
+         if (active_workout)
+         {
+            if ((active_workout.mode === 'ON') ||
+                ((system_state.supply_power_on) && (active_workout.mode === 'AUTO')))
+            {
+               if (active_workout.runtime < active_workout.cumtime)
+               {
+                  active_workout.runtime++;
+                  var len = active_workout.sections.length;
+                  for(var i = 0; i < len; i++)
+                  {
+                     if ((active_workout.runtime >= active_workout.sections[ i ].cumtime) &&
+                         (active_workout.runtime < active_workout.sections[ i ].cumtime + active_workout.sections[ i ].duration))
+                     {
+                        setValue("speed_demand", active_workout.sections[ i ].speed);
+                        break;
+                     }
+                  }
+               }
+            }
+         }
 
-//console.log(holding_registers);
      });
    });
 }
@@ -343,6 +360,42 @@ http.createServer(function(request, response) {
                  return;
               }
            }
+           else if (uri === "/workouts/active_workout_index")
+           {
+              value = Number(JSON.parse(body));
+              set_active_workout_index(value);
+              response.writeHead(204);
+              response.end();
+              return;
+           }
+           else if (uri === "/workouts/active_workout/runtime")
+           {
+              value = Number(JSON.parse(body));
+              if (active_workout)
+              {
+                 if ((value >= 0) && (value <= active_workout.cumtime))
+                 {
+                    active_workout.runtime = value;
+                 }
+              }
+              response.writeHead(204);
+              response.end();
+              return;
+           }
+           else if (uri === "/workouts/active_workout/mode")
+           {
+              value = JSON.parse(body);
+              if (active_workout)
+              {
+                 if ((value === 'ON') || (value === 'OFF') || (value === 'AUTO'))
+                 {
+                    active_workout.mode = value;
+                 }
+              }
+              response.writeHead(204);
+              response.end();
+              return;
+           }
         });
   }
   else if (request.method === "GET")
@@ -351,6 +404,48 @@ http.createServer(function(request, response) {
      {
         response.writeHead(200, {"Content-Type": "application/json"});
         response.write(JSON.stringify(system_state));
+        response.end();
+        return;
+     }
+     else if (uri === "/workouts")
+     {
+        response.writeHead(200, {"Content-Type": "application/json"});
+        response.write(JSON.stringify(workouts, function(key, value)
+           {
+             if (key=="sections")
+             {
+                return undefined;
+             }
+             else return value;
+          }));
+        response.end();
+        return;
+     }
+     else if (uri === "/workouts/active_workout_index")
+     {
+        response.writeHead(200, {"Content-Type": "application/json"});
+        response.write(JSON.stringify(active_workout_index));
+        response.end();
+        return;
+     }
+     else if (uri === "/workouts/active_workout")
+     {
+        response.writeHead(200, {"Content-Type": "application/json"});
+        response.write(JSON.stringify(active_workout));
+        response.end();
+        return;
+     }
+     else if (uri === "/workouts/active_workout/runtime")
+     {
+        response.writeHead(200, {"Content-Type": "application/json"});
+        response.write(JSON.stringify(active_workout.runtime));
+        response.end();
+        return;
+     }
+     else if (uri === "/workouts/active_workout/mode")
+     {
+        response.writeHead(200, {"Content-Type": "application/json"});
+        response.write(JSON.stringify(active_workout.mode));
         response.end();
         return;
      }
