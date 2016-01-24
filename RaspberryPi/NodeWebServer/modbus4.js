@@ -67,6 +67,7 @@ var workouts = [];
 var num_workouts = 0;
 var active_workout = null;
 var active_workout_index = -1;
+var last_time = null;
 
 function initialiseSystem()
 {
@@ -165,6 +166,15 @@ function read_registers()
          system_state.supply_power_filter_COF = Math.log(holding_registers[HOLDING_REGISTER_ADDRESS.supply_power_filter_COF] / 32768.0) * 100 / (-2.0 * Math.PI);
          system_state.radio_tx_interval = holding_registers[HOLDING_REGISTER_ADDRESS.radio_tx_interval];
 
+         var d = new Date();
+         var time = d.getTime();
+         var elapsed_ms = 0;
+         if (last_time)
+         {
+            elapsed_ms = (time - last_time);
+         }
+         last_time = time;
+         
          if (active_workout)
          {
             if ((active_workout.mode === 'ON') ||
@@ -172,7 +182,7 @@ function read_registers()
             {
                if (active_workout.runtime < active_workout.cumtime)
                {
-                  active_workout.runtime++;
+                  active_workout.runtime += elapsed_ms / 1000;
                   var len = active_workout.sections.length;
                   for(var i = 0; i < len; i++)
                   {
@@ -186,7 +196,6 @@ function read_registers()
                }
             }
          }
-
      });
    });
 }
