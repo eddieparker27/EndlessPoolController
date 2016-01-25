@@ -1,287 +1,329 @@
 <!DOCTYPE html>
 <html>
-<head>
-   <style>
-      body
-      {
-         background-image: url("water.png");
-         background-repeat: repeat;
-      }
-   </style>
-
-   <script type="text/javascript" src="loader.js"></script>
-   <script type="text/javascript">
-      var chart = null;
-
-      google.charts.load('current', {'packages':['corechart']});
-      google.charts.setOnLoadCallback(drawChart);
-
-      function drawChart()
-      {
-         if (chart)
+   <head>
+      <style>
+         body
          {
-            chart.clearChart();
+            background-image: url("water.png");
+            background-repeat: repeat;
          }
 
-         var tdata = new google.visualization.DataTable();
-         tdata.addColumn('datetime', 'Time');
-         tdata.addColumn('number', 'Demand');
-         tdata.addColumn('number', 'Actual');
-
-         var list_ele = list_head;
-         while(list_ele)
+         #table_workouts
          {
-            tdata.addRow([new Date(list_ele.date), Number(list_ele.demand), Number(list_ele.actual)]);
-            list_ele = list_ele.next;
+            border:solid 1px;
+            border-collapse:collapse;
+            width:100%;
          }
 
-         var options =
+         #table_workouts td
          {
-            title: 'Speeds',
-            //curveType: 'function',
-            legend: { position: 'bottom' },
-            vAxis: { minValue: 1 },
-            vAxis: { maxValue: 55 }
+            border:solid 1px;
+            vertical-align:middle;
+         }
+      </style>
+   </head>
+
+   <body onload="get_data()">
+      <script type="text/javascript" src="loader.js"></script>
+      <script type="text/javascript">
+         var chart = null;
+         var workouts = [];
+         var active_workout_index = -1;
+         var active_workout = null;
+
+         var system_state =
+         {
+            control_active : false,
+            supply_power_on : false,
+            speed_demand : 0,
+            speed_actual: 0,
+            speed_demand_register : 0,
+            speed_actual_register : 0,
+            speed_actual_volts : 0,
+            speed_demand_volts : 0,
+            supply_power_volts : 0,
+            speed_actual_filter_COF : 0,
+            supply_power_filter_COF : 0,
+            control_deadband_volts : 0,
+            control_timeconst : 0,
+            radio_tx_interval : 0
          };
 
-         chart = new google.visualization.LineChart(document.getElementById('curve_chart'));
-         chart.draw(tdata, options);
 
-      }
-   </script>
+         google.charts.load('current', {'packages':['corechart']});
+         google.charts.setOnLoadCallback(drawChart);
 
-</head>
-<body>
+         function drawChart()
+         {
+            if (chart)
+            {
+               chart.clearChart();
+            }
 
-<div id="system_state">*******</div>
+            if (active_workout)
+            {
+               var tdata = new google.visualization.DataTable();
+               tdata.addColumn('number', 'Runtime (seconds)');
+               tdata.addColumn('number', 'Speed');
+               tdata.addColumn({type:'string', role:'annotation'});
 
-<button type="button" onclick="updateSystemState()">Update System State</button>
-</br>
+               var len = active_workout.sections.length;
+               for(var i = 0; i < len; i++)
+               {
+                  tdata.addRow([active_workout.sections[ i ].cumtime, active_workout.sections[ i ].speed, null]);
+                  if ((active_workout.runtime >= active_workout.sections[ i ].cumtime) &&
+                      (active_workout.runtime < active_workout.sections[ i ].cumtime + active_workout.sections[ i ].duration))
+                  {
+                    tdata.addRow([active_workout.runtime, active_workout.sections[ i ].speed, "*"]);
+                  }
+                  tdata.addRow([active_workout.sections[ i ].cumtime + active_workout.sections[ i ].duration, active_workout.sections[ i ].speed, null]);
+               }
 
-<button type="button" onclick="controlActive(true)">Activate Control</button>
-<button type="button" onclick="controlActive(false)">Deactivate Control</button>
+               var options =
+               {
+                  title: 'Active Workout',
+                  //curveType: 'function',
+                  legend: { position: 'bottom' },
+                  vAxis: { minValue: 1 },
+                  vAxis: { maxValue: 55 }
+               };
 
-</br>
-<div>Speed Actual Cutoff Filter Frequency (Hz)</div>
-<input id="ascof_slider" type="range" min="0" max="1" value="0.3" step="0.01" onchange="setASCOF(ascof_slider.value)" />
-<output id="ascof_slider_value"></output>
+               chart = new google.visualization.LineChart(document.getElementById('table_active_workout_wrapper_div'));
+               chart.draw(tdata, options);
+            }
 
-</br>
-<div>Speed Demand (Volts)</div>
-<input id="sdv_slider" type="range" min="0" max="5" value="0.0" step="0.05" onchange="setSpeedDemandVolts(sdv_slider.value)" />
-<output id="sdv_slider_value"></output>
-
-</br>
-<div>Speed Demand (Register)</div>
-<input id="sdr_slider" type="range" min="0" max="1023" value="0" step="1" onchange="setSpeedDemandRegister(sdr_slider.value)" />
-<output id="sdr_slider_value"></output>
-<button type="button" onclick="setSpeedDemandRegister(sdr_slider_value.value-1+0x0E)">Inc</button>
-<button type="button" onclick="setSpeedDemandRegister(sdr_slider_value.value-0x0D)">Dec</button>
-
-</br>
-<div>Speed Demand</div>
-<input id="speed_demand_slider" type="range" min="1" max="55" value="1" step="1" onchange="setSpeedDemand(speed_demand_slider.value)" />
-<output id="speed_demand_slider_value"></output>
-<button type="button" onclick="setSpeedDemand(speed_demand_slider_value.value-1+2)">Inc</button>
-<button type="button" onclick="setSpeedDemand(speed_demand_slider_value.value-1)">Dec</button>
+         }
 
 
-</br>
-<div>Control Deadband (Volts)</div>
-<input id="cdbv_slider" type="range" min="0" max="0.1" value="0.0" step="0.01" onchange="setControlDeadbandVolts(cdbv_slider.value)" />
-<output id="cdbv_slider_value"></output>
 
-</br>
-<div>Control Timeconst (ms)</div>
-<input id="ctc_slider" type="range" min="0" max="65535" value="10000" step="1" onchange="setControlTimeconst(ctc_slider.value)" />
-<output id="ctc_slider_value"></output>
+         function create_workouts_table()
+         {
+            if (workouts)
+            {
+               var theader = "<table id='table_workouts'><thead>";
+               theader += "<td>Name</td><td>Active Workout</td>";
+               theader += "<td>Description</td>";
+               var tbody = "";
 
-</br>
-<div id="curve_chart" style="width: 900px; height: 500px"></div>
+               for(var i = 0; i < workouts.length; i++)
+               {
+                  tbody += "<tr>";
+                  tbody += "<td>" + workouts[ i ].name + "</td>";
+                  if (i == active_workout_index)
+                  {
+                     tbody += "<td>IS ACTIVE</td>"
+                  }
+                  else
+                  {
+                     tbody += "<td><button type='button' onclick='setActive(" + i + ")'>SetActive</button></td>";
+                  }
+                  tbody += "<td>" + workouts[ i ].description + "</td>";
 
-<script>
+                  tbody += "</tr>"
+                  tbody += "<br />";
+               }
+               var tfooter = "</table>";
+               document.getElementById('table_workouts_wrapper_div').innerHTML = theader + tbody + tfooter;
+            }
+         }
 
-function controlActive(is_active)
-{
-    var xhttp = new XMLHttpRequest();
+         function setActive(index)
+         {
+            var xhttp = new XMLHttpRequest();
 
-    xhttp.onreadystatechange = function () {
-        if (xhttp.readystate == 4 && xhttp.status == 200) {
-        }
-    };
+            xhttp.onreadystatechange = function() {
+              if (xhttp.readystate == 4 && xhttp.status == 204)
+              {
 
-    xhttp.open("PUT", "/system_state/control_active", true);
-    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-    var put_data = JSON.stringify(is_active);
-    xhttp.send(put_data);
+              }
+            };
 
-}
+            xhttp.open("PUT", "/workouts/active_workout_index", true);
+            xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            var put_data = JSON.stringify(index);
+            xhttp.send(put_data);
+            setTimeout(get_active_workout_index(), 500);
+            setTimeout(get_active_workout(), 500);
+         }
 
-function setASCOF(value)
-{
-   document.getElementById("ascof_slider_value").value = value;
-   var xhttp = new XMLHttpRequest();
+         function set_active_workout_runtime(runtime)
+         {
+            var xhttp = new XMLHttpRequest();
 
-   xhttp.onreadystatechange = function() {
-     if (xhttp.readystate == 4 && xhttp.status == 200)
-     {
-     }
-   };
+            xhttp.onreadystatechange = function() {
+              if (xhttp.readystate == 4 && xhttp.status == 204)
+              {
 
-   xhttp.open("PUT", "/system_state/speed_actual_filter_COF", true);
-   xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-   var put_data = JSON.stringify(value);
-   xhttp.send(put_data);
-}
+              }
+            };
 
-function setControlDeadbandVolts(value) {
-    document.getElementById("cdbv_slider_value").value = value;
-    var xhttp = new XMLHttpRequest();
+            xhttp.open("PUT", "/workouts/active_workout/runtime", true);
+            xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            var put_data = JSON.stringify(runtime);
+            xhttp.send(put_data);
+            setTimeout(get_active_workout_index(), 500);
+            setTimeout(get_active_workout(), 500);
+         }
 
-    xhttp.onreadystatechange = function () {
-        if (xhttp.readystate == 4 && xhttp.status == 200) {
-        }
-    };
+         function set_active_workout_mode(mode)
+         {
+            var xhttp = new XMLHttpRequest();
 
-    xhttp.open("PUT", "/system_state/control_deadband_volts", true);
-    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-    var put_data = JSON.stringify(value);
-    xhttp.send(put_data);
-}
+            xhttp.onreadystatechange = function() {
+              if (xhttp.readystate == 4 && xhttp.status == 204)
+              {
 
-function setControlTimeconst(value) {
-    document.getElementById("ctc_slider_value").value = value;
-    var xhttp = new XMLHttpRequest();
+              }
+            };
 
-    xhttp.onreadystatechange = function () {
-        if (xhttp.readystate == 4 && xhttp.status == 200) {
-        }
-    };
+            xhttp.open("PUT", "/workouts/active_workout/mode", true);
+            xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            var put_data = JSON.stringify(mode);
+            xhttp.send(put_data);
+         }
 
-    xhttp.open("PUT", "/system_state/control_timeconst", true);
-    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-    var put_data = JSON.stringify(value);
-    xhttp.send(put_data);
-}
+         function get_active_workout_index()
+         {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+               if (xhttp.readyState == 4 && xhttp.status == 200)
+               {
+                  //document.getElementById("system_state").innerHTML = xhttp.responseText;
+                  active_workout_index = JSON.parse(xhttp.responseText);
+                  create_workouts_table();
+               }
+            }
+            xhttp.open("GET", "workouts/active_workout_index", true);
+            xhttp.send();
+         }
 
-var system_state =
-{
-   control_active : false,
-   supply_power_on : false,
-   speed_demand : 0,
-   speed_actual: 0,
-   speed_demand_register : 0,
-   speed_actual_register : 0,
-   speed_actual_volts : 0,
-   speed_demand_volts : 0,
-   supply_power_volts : 0,
-   speed_actual_filter_COF : 0,
-   supply_power_filter_COF : 0,
-   control_deadband_volts : 0,
-   control_timeconst : 0,
-   radio_tx_interval : 0
-};
+         function get_active_workout_mode()
+         {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+               if (xhttp.readyState == 4 && xhttp.status == 200)
+               {
+                  active_workout_mode = JSON.parse(xhttp.responseText);
+                  if (active_workout_mode === 'OFF')
+                  {
+                     document.form_rad_but_mode.mode[0].checked = true;
+                  }
+                  else if (active_workout_mode === 'ON')
+                  {
+                     document.form_rad_but_mode.mode[1].checked = true;
+                  }
+                  else
+                  {
+                     document.form_rad_but_mode.mode[2].checked = true;
+                  }
+               }
+            }
+            xhttp.open("GET", "workouts/active_workout/mode", true);
+            xhttp.send();
+         }
 
-var list_head = null;
-var list_tail = null;
-var list_length = 0;
-var list_length_max = 100;
+         function get_workouts()
+         {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+               if (xhttp.readyState == 4 && xhttp.status == 200)
+               {
+                  //document.getElementById("system_state").innerHTML = xhttp.responseText;
+                  workouts = JSON.parse(xhttp.responseText);
+                  get_active_workout_index();
+               }
+            };
+            xhttp.open("GET", "workouts", true);
+            xhttp.send();
+         }
 
-setInterval(updateSystemState, 1000);
+         function get_active_workout()
+         {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function()
+            {
+               if (xhttp.readyState == 4 && xhttp.status == 200)
+               {
+                  active_workout = JSON.parse(xhttp.responseText);
+                  drawChart();
+                  get_active_workout_mode();
+               }
+            };
+            xhttp.open("GET", "workouts/active_workout", true);
+            xhttp.send();
+         }
 
-function updateSystemState() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (xhttp.readyState == 4 && xhttp.status == 200) {
-      document.getElementById("system_state").innerHTML = xhttp.responseText;
-      system_state = JSON.parse(xhttp.responseText);
+         function controlActive(is_active)
+         {
+             var xhttp = new XMLHttpRequest();
 
-      document.getElementById("ascof_slider_value").value = system_state.speed_actual_filter_COF;
-      document.getElementById("sdv_slider_value").value = system_state.speed_demand_volts;
-      document.getElementById("sdr_slider_value").value = system_state.speed_demand_register;
-      document.getElementById("speed_demand_slider_value").value = system_state.speed_demand;
-      document.getElementById("cdbv_slider_value").value = system_state.control_deadband_volts;
-      document.getElementById("ctc_slider_value").value = system_state.control_timeconst;
+             xhttp.onreadystatechange = function () {
+                 if (xhttp.readystate == 4 && xhttp.status == 200) {
+                 }
+             };
 
-//console.log(xhttp.responseText);
-//console.log(system_state);
+             xhttp.open("PUT", "/system_state/control_active", true);
+             xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+             var put_data = JSON.stringify(is_active);
+             xhttp.send(put_data);
 
-      list_length++;
-      var d = new Date();
+         }
 
-      var list_ele = {
-         date : d.getTime(),
-         demand : system_state.speed_demand,
-         actual : system_state.speed_actual,
-         prev : list_tail,
-         next : null};
+         function updateSystemState()
+         {
+           var xhttp = new XMLHttpRequest();
+           xhttp.onreadystatechange = function()
+           {
+             if (xhttp.readyState == 4 && xhttp.status == 200)
+             {
+               system_state = JSON.parse(xhttp.responseText);
+               if (system_state.control_active)
+               {
+                  document.form_rad_but_control_active.mode[1].checked = true;
+               }
+               else
+               {
+                  document.form_rad_but_control_active.mode[0].checked = true;
+               }
+               get_active_workout();
+             }
+           };
+           xhttp.open("GET", "system_state", true);
+           xhttp.send();
+         }
 
-     if (!list_head)
-     {
-        list_head = list_ele;
-     }
-     else if (list_length > list_length_max)
-     {
-        list_head = list_head.next;
-        list_head.prev = null;
-        list_length--;
-     }
+         function get_data()
+         {
+            get_workouts();
+            get_active_workout();
+         }
 
-     if (list_tail)
-     {
-        list_tail.next = list_ele;
-     }
-     list_tail = list_ele;
+         setInterval(updateSystemState, 1000);
 
-     drawChart();
+      </script>
 
-    }
-  };
-  xhttp.open("GET", "system_state", true);
-  xhttp.send();
-}
+      <div id="table_workouts_wrapper_div"></div>
+      <button type="button" onclick="set_active_workout_runtime(0)">Reset Runtime</button><br>
 
-function setSpeedDemandVolts(value)
-{
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (xhttp.readyState == 4 && xhttp.status == 200)
-    {
+      <div>Control Active</div>
+      <form name="form_rad_but_control_active">
+         <input type="radio" name="mode" value="Off" checked onclick="controlActive(false)"> Off<br>
+         <input type="radio" name="mode" value="On" onclick="controlActive(true)"> On<br>
+      </form>
 
-    }
-  };
-  xhttp.open("PUT", "/system_state/speed_demand_volts", true);
-  xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-  var put_data = JSON.stringify(value);
-  xhttp.send(put_data);
-}
+      <div>Run Mode</div>
+      <form name="form_rad_but_mode">
+         <input type="radio" name="mode" value="Off" checked onclick="set_active_workout_mode('OFF')"> Off<br>
+         <input type="radio" name="mode" value="On" onclick="set_active_workout_mode('ON')"> On<br>
+         <input type="radio" name="mode" value="Auto" onclick="set_active_workout_mode('AUTO')"> Auto
+      </form>
 
-function setSpeedDemandRegister(value) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function () {
-        if (xhttp.readyState == 4 && xhttp.status == 200) {
+      <div id="table_active_workout_wrapper_div" style="width: 900px; height: 500px"></div>
 
-        }
-    };
-    xhttp.open("PUT", "/system_state/speed_demand_register", true);
-    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-    var put_data = JSON.stringify(value);
-    xhttp.send(put_data);
-}
+   </body>
 
-function setSpeedDemand(value) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function () {
-        if (xhttp.readyState == 4 && xhttp.status == 200) {
 
-        }
-    };
-    xhttp.open("PUT", "/system_state/speed_demand", true);
-    xhttp.setRequestHeader("Content-Type", "application/json; charset=utf-8");
-    var put_data = JSON.stringify(value);
-    xhttp.send(put_data);
-}
-</script>
-
-</body>
 </html>

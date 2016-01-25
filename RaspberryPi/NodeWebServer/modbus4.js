@@ -110,6 +110,13 @@ function initialiseSystem()
       }
    }
 
+   if (num_workouts < 1)
+   {
+      workouts[ num_workouts++ ] = {name : "Dummy", description : "Dummy", sections : [{speed : 0, duration : 0}]};
+   }
+
+   set_active_workout_index(0);
+
    /*
    * Initialise control parameters
    */
@@ -174,7 +181,7 @@ function read_registers()
             elapsed_ms = (time - last_time);
          }
          last_time = time;
-         
+
          if (active_workout)
          {
             if ((active_workout.mode === 'ON') ||
